@@ -1,0 +1,18 @@
+{
+  "step": 4,
+  "name": "template-portfolio",
+  "title": "portfolio template: portfolio_items + guestbook schema, MDX render, Google-auth write — no payment, no Turnstile",
+  "exit_code": 0,
+  "stdout": "AC1 pnpm --filter portfolio build: exit 0 (6 dynamic routes)\nAC2 no toss in portfolio: PASS\nAC3 no turnstile in portfolio: PASS\nAC4 no email/password input: PASS\nAC5 pnpm --filter portfolio test: 6/6 pass\nAC6 supabase db reset: DEFERRED_TO_CI",
+  "stderr": "",
+  "duration_seconds": 60.0,
+  "timestamp": "2026-07-17T00:32:00Z",
+  "verification": {
+    "AC1_pnpm_build": "PASS",
+    "AC2_no_toss": "PASS",
+    "AC3_no_turnstile": "PASS",
+    "AC4_no_email_password": "PASS",
+    "AC5_pnpm_test_count": "6/6",
+    "AC6_supabase_db_reset": "DEFERRED_TO_CI"
+  }
+}
