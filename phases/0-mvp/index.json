@@ -72,8 +72,16 @@
       "step": 4,
       "name": "template-portfolio",
       "title": "portfolio template: portfolio_items + guestbook schema, MDX render, Google-auth write \u2014 no payment, no Turnstile",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "summary": "portfolio template: portfolio_items + guestbook (\u22641000 char) + RLS, MDX render via compileMDX, GoogleSignInButton + server-action guestbook. NO Toss, NO Turnstile, NO email/password. All 5 in-scope ACs PASS; pnpm build=0, test=6/6",
+      "started_at": "2026-07-17T00:30:30Z",
+      "completed_at": "2026-07-17T00:33:00Z",
+      "branch": "plan/boilerplate-cli-step4",
+      "commits": [
+        "e73c2de",
+        "10f6808"
+      ]
     },
     {
       "step": 5,
