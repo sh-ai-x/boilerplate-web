@@ -4,15 +4,11 @@ const path = require('path');
 const fs = require('fs');
 
 const VALID_TYPES = ['saas', 'shop', 'portfolio'];
-const REPO = 'sanghee-dev/boilerplate-web';
 
-// templates.lock.json is the SINGLE SOURCE OF TRUTH for the template ref.
-// It MUST pin an immutable commit SHA, not a tag or branch — tags can be
-// re-pointed, branches move. The release process bumps this file.
-// On the CLI side, the ref lives here, NOT in source code, to prevent
-// CLI version ↔ template ref drift (security M / review major).
+// templates.lock.json is the SINGLE SOURCE OF TRUTH for the source repo AND
+// the per-type template subdirectory. We never hardcode either in source —
+// that would cause drift between CLI version and template contents.
 function loadLock() {
-  // Walk up from the CLI's lib/ dir to find templates.lock.json (1 level up).
   const lockPath = path.join(__dirname, '..', '..', 'templates.lock.json');
   if (!fs.existsSync(lockPath)) {
     throw new Error(
@@ -25,10 +21,24 @@ function loadLock() {
       `templates.lock.json 'ref' must be a 40-char commit SHA (got ${JSON.stringify(data.ref)}).`
     );
   }
+  if (typeof data.source !== 'string' || !data.source.startsWith('github:')) {
+    throw new Error(
+      `templates.lock.json 'source' must be a github: spec (got ${JSON.stringify(data.source)}).`
+    );
+  }
+  if (!data.templates || typeof data.templates !== 'object') {
+    throw new Error(`templates.lock.json 'templates' must be an object.`);
+  }
+  for (const t of VALID_TYPES) {
+    if (typeof data.templates[t] !== 'string') {
+      throw new Error(
+        `templates.lock.json 'templates.${t}' must be a string subdirectory path.`
+      );
+    }
+  }
   return data;
 }
 
-// Loaded lazily so test code can stub.
 let _lock = null;
 function getLock() {
   if (!_lock) _lock = loadLock();
@@ -40,13 +50,14 @@ function validateType(type) {
 }
 
 function buildSrc(type) {
-  // github:org/repo#<immutable-sha>/sub/folder
   const lock = getLock();
   if (!validateType(type)) {
-    // Defensive: should never happen if validateType is called first.
     throw new Error(`Invalid --type "${type}"`);
   }
-  return `github:${REPO}#${lock.ref}/templates/${type}`;
+  // github:<repo>#<sha>/<subdir-from-lockfile>
+  // The subdir comes from the lockfile, NOT hardcoded. This is the lockfile
+  // SSOT claim (review nit).
+  return `${lock.source}#${lock.ref}/${lock.templates[type]}`;
 }
 
 function downloadTemplate(type, targetFolder, opts = {}, degitImpl) {
@@ -58,8 +69,6 @@ function downloadTemplate(type, targetFolder, opts = {}, degitImpl) {
     return Promise.reject(err);
   }
 
-  // Allow tests to inject a fake degit impl. In production, require() the
-  // module and surface a clean error if it's missing.
   let degit = degitImpl;
   if (!degit) {
     try {
@@ -78,4 +87,4 @@ function downloadTemplate(type, targetFolder, opts = {}, degitImpl) {
   return emitter.clone(path.resolve(targetFolder));
 }
 
-module.exports = { VALID_TYPES, REPO, validateType, buildSrc, downloadTemplate, loadLock };
+module.exports = { VALID_TYPES, validateType, buildSrc, downloadTemplate, loadLock };

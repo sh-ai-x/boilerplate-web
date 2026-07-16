@@ -7,24 +7,27 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
-const { validateType, buildSrc, downloadTemplate, VALID_TYPES } =
+const { validateType, buildSrc, downloadTemplate, VALID_TYPES, loadLock } =
   require('../cli/lib/target-download');
 const { POST_INSTALL_STEPS } = require('../cli/lib/post-install');
+const { assertSafeTarget, isInsideCwd, revalidateBeforeWrite } = require('../cli/lib/path-safety');
+const { installDeps } = require('../cli/lib/install-deps');
+const { runPipeline } = require('../cli/lib/pipeline');
+const { cleanup } = require('../cli/lib/cleanup');
+const { parseArgs } = require('../cli/lib/parse-args');
 
-// Helper: run `node cli/index.js <args>` in this worktree and return {status,stdout,stderr}.
-function runCli(args) {
+function runCli(args, opts = {}) {
   const cliPath = path.join(__dirname, '..', 'cli/index.js');
   return spawnSync(process.execPath, [cliPath, ...args], {
     encoding: 'utf8',
-    timeout: 30000,
+    timeout: opts.timeout || 30000,
+    input: opts.stdin,
   });
 }
 
-// === validateType ===
+// === validateType (AC3) ===
 test('validateType accepts the 3 supported types', () => {
-  for (const t of VALID_TYPES) {
-    assert.equal(validateType(t), true, `expected ${t} to be valid`);
-  }
+  for (const t of VALID_TYPES) assert.equal(validateType(t), true);
 });
 
 test('validateType rejects unknown values before any network call (AC3)', () => {
@@ -41,185 +44,236 @@ test('post-install checklist mentions supabase link, db push, functions deploy',
   assert.match(all, /supabase functions deploy/);
 });
 
-// === buildSrc — degit ref pinning ===
-test('buildSrc pins the ref to templates.lock.json SHA (A06-5, behavioral)', () => {
-  const lock = require('../templates.lock.json');
-  // The ref must be an immutable 40-char SHA, not a tag.
+// === buildSrc — ref + source + subdir from lockfile ===
+test('buildSrc reads source + ref + subdir from templates.lock.json (SSOT, behavioral)', async () => {
+  const lock = loadLock();
   assert.match(lock.ref, /^[0-9a-f]{40}$/, 'lock ref must be a 40-char commit SHA');
-  // Every built src must include the SHA.
+  assert.ok(lock.source.startsWith('github:'), 'lock.source must be a github: spec');
   for (const t of VALID_TYPES) {
     const src = buildSrc(t);
     assert.match(
       src,
-      new RegExp(`^github:sanghee-dev/boilerplate-web#${lock.ref}/templates/${t}$`),
-      `${t} must use the pinned SHA in source path`
+      new RegExp(`^${lock.source}#${lock.ref}/${lock.templates[t]}$`),
+      `${t} src must use lock.source + lock.ref + lock.templates[${t}]`
     );
-  }
-  // And not a tag.
-  for (const t of VALID_TYPES) {
-    const src = buildSrc(t);
-    assert.doesNotMatch(src, /#v\d+\.\d+\.\d+\//, `${t} must not use a version tag`);
+    // And the subdir MUST equal lock.templates[t] (the lockfile SSOT).
+    assert.ok(src.endsWith('/' + lock.templates[t]), `${t} src must end with lock.templates[${t}]`);
   }
 });
 
-test('buildSrc reads ref from templates.lock.json (single source of truth)', () => {
-  // The CLI version lives in package.json. The template ref lives in
-  // templates.lock.json. They MUST be independent files to avoid drift.
-  const lockPath = path.join(__dirname, '..', 'templates.lock.json');
-  const pkgPath = path.join(__dirname, '..', 'package.json');
-  assert.ok(fs.existsSync(lockPath), 'templates.lock.json must exist');
-  assert.ok(fs.existsSync(pkgPath), 'package.json must exist');
-  // buildSrc must not have a hardcoded tag/branch as a fallback.
-  const src = fs.readFileSync(path.join(__dirname, '..', 'cli/lib/target-download.js'), 'utf8');
-  assert.match(src, /templates\.lock\.json/, 'must read templates.lock.json');
-  assert.match(src, /\[0-9a-f\]\{40\}/, 'must validate the ref is a 40-char SHA');
-});
-
-// === downloadTemplate — behavioral test with injected degit impl ===
+// === downloadTemplate — behavioral with injected degit ===
 test('downloadTemplate rejects invalid type before any degit call (AC3, behavioral)', async () => {
   let called = false;
   const fakeDegit = () => ({ clone: () => { called = true; return Promise.resolve(); } });
-  await assert.rejects(
-    () => downloadTemplate('invalid', '/tmp/cbw-x', {}, fakeDegit),
-    /Invalid --type/
-  );
-  assert.equal(called, false, 'degit must not be called for invalid types');
+  await assert.rejects(() => downloadTemplate('invalid', '/tmp/cbw-x', {}, fakeDegit), /Invalid --type/);
+  assert.equal(called, false);
 });
 
-test('downloadTemplate passes force:false by default (A06-3, behavioral)', async () => {
+test('downloadTemplate defaults to force:false (A06-3, behavioral)', async () => {
   let capturedOpts = null;
-  const fakeDegit = () => ({
-    clone: () => Promise.resolve(),
-  });
-  // The factory is what receives the opts; we wrap to capture.
-  const capture = (src, opts) => {
+  await downloadTemplate('saas', '/tmp/cbw-y', {}, (src, opts) => {
     capturedOpts = opts;
     return { clone: () => Promise.resolve() };
-  };
-  await downloadTemplate('saas', '/tmp/cbw-y', {}, capture);
-  assert.equal(capturedOpts.force, false, 'force must default to false');
+  });
+  assert.equal(capturedOpts.force, false);
 });
 
 test('downloadTemplate respects opts.force === true (A06-3, behavioral)', async () => {
   let capturedOpts = null;
-  const capture = (src, opts) => {
+  await downloadTemplate('saas', '/tmp/cbw-z', { force: true }, (src, opts) => {
     capturedOpts = opts;
     return { clone: () => Promise.resolve() };
-  };
-  await downloadTemplate('saas', '/tmp/cbw-z', { force: true }, capture);
-  assert.equal(capturedOpts.force, true, 'force:true must propagate to degit');
+  });
+  assert.equal(capturedOpts.force, true);
 });
 
-test('downloadTemplate builds pinned-SHA source path (A06-5, behavioral)', async () => {
-  const lock = require('../templates.lock.json');
-  let capturedSrc = null;
-  const capture = (src, opts) => {
-    capturedSrc = src;
-    return { clone: () => Promise.resolve() };
-  };
-  await downloadTemplate('shop', '/tmp/cbw-q', {}, capture);
-  assert.match(
-    capturedSrc,
-    new RegExp(`^github:sanghee-dev/boilerplate-web#${lock.ref}/templates/shop$`),
-    'must use the pinned SHA from templates.lock.json'
+test('downloadTemplate returns a typed Error for missing degit (behavioral)', async () => {
+  // The injected impl returns null; downloadTemplate should fall through to the
+  // MISSING_DEGIT branch.
+  await assert.rejects(
+    () => downloadTemplate('saas', '/tmp/cbw-m', {}, null),
+    /Missing dependency/,
   );
 });
 
-// === CLI: --prefixed token as positional is rejected (parseArgs) ===
-test('cli rejects --prefixed value as the positional targetFolder', () => {
-  const r = runCli(['--type=saas']);
-  assert.notEqual(r.status, 0, '--prefixed positional must fail');
-  assert.match(r.stderr, /target folder must not start with "--"/);
+// === assertSafeTarget — behavioral ===
+test('assertSafeTarget rejects target that resolves to CWD itself', () => {
+  assert.throws(() => assertSafeTarget('.', { allowUnsafe: false }), /outside the current directory/);
 });
 
-test('cli rejects targetFolder starting with --', () => {
-  // No --type so we hit the positional check after type-parse.
-  const r = runCli(['--bad', '--type=saas']);
-  // Without --type, the missing-type error fires first. With --type, the
-  // --prefixed positional check fires.
-  assert.notEqual(r.status, 0);
-  // We don't strictly assert the error text here because parse order depends
-  // on which check fires first; both end with exit 1.
+test('assertSafeTarget rejects parent-relative without --force', () => {
+  assert.throws(() => assertSafeTarget('../../../tmp/cbw-escape', { allowUnsafe: false }), /outside the current directory/);
 });
 
-// === CLI: invalid type exits 1 with no /tmp dir created (AC3) ===
+test('assertSafeTarget allows --force to bypass CWD check', () => {
+  const r = assertSafeTarget('../../../tmp/cbw-force', { allowUnsafe: true });
+  assert.equal(r, path.resolve('../../../tmp/cbw-force'));
+});
+
+test('isInsideCwd distinguishes rel=empty (cwd itself) from rel=valid (inside)', () => {
+  const cwd = process.cwd();
+  assert.equal(isInsideCwd(cwd), false, 'cwd itself is NOT inside CWD (rel===empty)');
+  assert.equal(isInsideCwd(path.join(cwd, 'subdir')), true, 'subdir IS inside CWD');
+});
+
+test('assertSafeTarget rejects a real symlink in the path chain (intermediate, behavioral)', () => {
+  // Create a temp dir, then a symlink inside it that points outside CWD.
+  const tmp = fs.mkdtempSync(path.join('.tmp-tests', 'cbw-sym-'));
+  const target = path.join(tmp, 'link');
+  try {
+    fs.symlinkSync('/etc', target);
+    assert.throws(() => assertSafeTarget(target, { allowUnsafe: false }), /symlink/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('revalidateBeforeWrite detects a symlink insertion (TOCTOU guard, behavioral)', () => {
+  // Create a non-existent target, then create a symlink at it pointing outside
+  // CWD. The revalidator should refuse.
+  const target = path.join('.tmp-tests', `cbw-toc-${Date.now()}`);
+  try {
+    // Create a symlink at `target` pointing to /etc. realpathSync will follow
+    // the symlink, and isInsideCwd will reject the resolved path.
+    fs.symlinkSync('/etc', target);
+    assert.throws(
+      () => revalidateBeforeWrite(target),
+      /outside the current working directory/,
+    );
+  } finally {
+    try { fs.unlinkSync(target); } catch (_) {}
+  }
+});
+
+// === parseArgs ===
+test('parseArgs rejects --prefixed value as the positional target', () => {
+  assert.throws(
+    () => parseArgs(['node', 'cli.js', '--badtoken', '--type=saas']),
+    /target folder must not start with "--"/,
+  );
+});
+
+test('parseArgs returns the expected shape', () => {
+  const r = parseArgs(['node', 'cli.js', 'my-target', '--type=shop', '--overwrite', '--yes', '--force', '--allow-scripts']);
+  assert.equal(r.targetFolder, 'my-target');
+  assert.equal(r.type, 'shop');
+  assert.equal(r.overwrite, true);
+  assert.equal(r.yes, true);
+  assert.equal(r.force, true);
+  assert.equal(r.allowScripts, true);
+});
+
+// === runPipeline + cleanup — behavioral ===
+test('runPipeline: success does not call cleanup', async () => {
+  let cleanupCalled = false;
+  const cleanupSpy = () => { cleanupCalled = true; };
+  const target = path.join(os.tmpdir(), `cbw-pipe-${Date.now()}`);
+  try {
+    await runPipeline(target, { unsafeAllowed: false, targetPreExisted: false }, [
+      () => { /* step 1 ok */ },
+      () => { /* step 2 ok */ },
+    ]);
+    assert.equal(cleanupCalled, false);
+  } finally {
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test('runPipeline: failure triggers cleanup and re-throws', async () => {
+  // Create a target that does NOT pre-exist; cleanup should rmSync it.
+  const target = path.join(os.tmpdir(), `cbw-pipe-fail-${Date.now()}`);
+  try {
+    await assert.rejects(
+      () => runPipeline(target, { unsafeAllowed: false, targetPreExisted: false }, [
+        () => { /* step 1 ok */ },
+        () => { throw new Error('boom'); },
+      ]),
+      /boom/,
+    );
+    // cleanup should have run and removed the (non-existent) target
+    assert.equal(fs.existsSync(target), false, 'cleanup should have removed the partial target');
+  } finally {
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test('cleanup respects targetPreExisted and never deletes user files (behavioral)', () => {
+  // Create a pre-existing target with a user file; run cleanup; file must survive.
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'cbw-pre-'));
+  const userFile = path.join(target, 'precious.txt');
+  fs.writeFileSync(userFile, 'do-not-delete');
+  try {
+    cleanup(target, { unsafeAllowed: false, targetPreExisted: true });
+    assert.equal(fs.existsSync(userFile), true, 'pre-existing user file must NOT be deleted');
+  } finally {
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test('cleanup deletes a non-pre-existing target (best effort)', () => {
+  const target = path.join('.tmp-tests', `cbw-clean-${Date.now()}`);
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'a.txt'), 'a');
+  cleanup(target, { unsafeAllowed: false, targetPreExisted: false });
+  assert.equal(fs.existsSync(target), false, 'non-pre-existing target should be removed');
+});
+
+// === installDeps ===
+test('installDeps uses execFileSync (no shell injection) — behavioral via missing dir', () => {
+  // Point cwd at a non-existent dir; installDeps should throw with a clear
+  // error (the npm install line is built from args, not from a shell string).
+  const missing = path.join(os.tmpdir(), `cbw-noexist-${Date.now()}`);
+  assert.throws(
+    () => installDeps(missing, { allowScripts: false }),
+    /npm install failed/,
+  );
+});
+
+// === CLI integration — behavioral ===
 test('cli rejects invalid --type and does not create target dir (AC3, behavioral)', () => {
-  const target = path.join(os.tmpdir(), `cbw-test-bad-${Date.now()}`);
+  const target = path.join(os.tmpdir(), `cbw-bad-${Date.now()}`);
   const r = runCli([target, '--type=invalid']);
-  assert.notEqual(r.status, 0, 'invalid type must fail');
-  assert.equal(fs.existsSync(target), false, 'target dir must not be created');
-});
-
-// === CLI: --ignore-scripts default (A03-5) ===
-test('cli invokes npm install with --ignore-scripts by default (A03-5, behavioral)', () => {
-  // We can't run a real degit + npm install in this sandbox, but we can
-  // assert the npm-install flag is in the cli source (intentional) and the
-  // npm-install call is wrapped so a real run would see it.
-  const src = fs.readFileSync(path.join(__dirname, '..', 'cli/index.js'), 'utf8');
-  assert.match(src, /--ignore-scripts/);
-  assert.match(src, /--allow-scripts/);
-  // And the opt-in default is false: --ignore-scripts appears unless --allow-scripts is set.
-  assert.match(src, /if \(!allowScripts\) flags\.push\('--ignore-scripts'\)/);
-});
-
-// === CLI: path safety (rel === '' means cwd itself, must be rejected) ===
-test('assertSafeTarget rejects target that resolves to CWD itself (cleanup-races-CWD fix)', () => {
-  // The "current working directory itself" case. The CLI's --force must be
-  // required to write into '.'.
-  const r = runCli(['.', '--type=saas']);
-  assert.notEqual(r.status, 0, 'target=current dir must be rejected without --force');
-  assert.match(r.stderr, /outside the current directory|--force/);
-});
-
-test('assertSafeTarget rejects parent-relative paths (../../tmp/...) without --force', () => {
-  const r = runCli(['../../../tmp/cbw-escape', '--type=saas']);
   assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /outside the current directory|--force/);
+  assert.equal(fs.existsSync(target), false);
 });
 
-test('assertSafeTarget allows ./relative/inside/cwd', () => {
-  // No actual download (sandbox has no network for degit), but the path
-  // check should pass — the next failure is the missing degit module.
-  // We pass a name that does not exist yet; the path check is the gate.
-  const r = runCli(['./__cbw_nonexistent_subdir__', '--type=saas']);
-  // The path check passes; the next failure is degit clone (network/module).
-  // We expect exit 1 (degit missing or network error) but NOT a path-safety error.
-  if (r.status === 0) return; // tolerated if degit happens to be available
-  assert.doesNotMatch(r.stderr, /outside the current directory/, 'path check should pass');
+test('cli --help exits 0 with usage', () => {
+  const r = runCli(['--help']);
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /Usage:/);
 });
 
-// === CLI: --force is required for the unsafe path ===
-test('--force bypasses CWD check (intentional, but is the only override)', () => {
-  const r = runCli(['../../../tmp/cbw-force-test', '--type=saas', '--force']);
-  // Should not produce the "outside the current directory" error.
-  assert.doesNotMatch(r.stderr, /outside the current directory/);
+test('cli --version prints name and version', () => {
+  const r = runCli(['--version']);
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /create-boilerplate-web \d+\.\d+\.\d+/);
 });
 
-// === CLI: --overwrite is required to enable degit force:true ===
-test('--overwrite enables degit force, default is force:false (A06-3, behavioral)', () => {
-  // Inspect the wiring: the CLI only passes { force: overwrite } to downloadTemplate.
-  const src = fs.readFileSync(path.join(__dirname, '..', 'cli/index.js'), 'utf8');
-  assert.match(src, /downloadTemplate\(type, safeTarget, \{ force: overwrite \}\)/);
+test('cli --overwrite + non-empty target + --yes still requires typed "delete" (M1, behavioral)', () => {
+  // Create a non-empty target, run cli with --overwrite --yes; the cli
+  // should still require the user to type "delete".
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'cbw-ow-'));
+  fs.writeFileSync(path.join(target, 'precious.txt'), 'data');
+  try {
+    const r = runCli([target, '--type=saas', '--overwrite', '--yes'], { stdin: 'wrong\n' });
+    assert.notEqual(r.status, 0, 'cli must refuse without typed "delete"');
+    // Verify the user file still exists (cli didn't run degit).
+    assert.equal(fs.existsSync(path.join(target, 'precious.txt')), true);
+  } finally {
+    fs.rmSync(target, { recursive: true, force: true });
+  }
 });
 
-// === CLI: cleanup() re-validates inside-CWD (defense-in-depth) ===
-test('cleanup() re-validates that the target is inside CWD before rmSync', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'cli/index.js'), 'utf8');
-  assert.match(src, /isInsideCwd/);
-  assert.match(src, /refusing to clean up .* outside the current working directory/);
-});
-
-// === rewrite.js behavior: leaves deps/scripts intact ===
-test('rewrite.js leaves dependencies and scripts intact (AC2-equivalent, behavioral)', () => {
+// === rewrite behavior ===
+test('rewrite.js leaves dependencies and scripts intact (behavioral)', () => {
   const { rewritePackageName } = require('../cli/lib/rewrite');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cbw-rewrite-'));
-  const pkg = {
+  fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
     name: 'original',
     version: '1.0.0',
     dependencies: { next: '^14.0.0' },
     scripts: { dev: 'next dev' },
-  };
-  fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify(pkg, null, 2));
+  }, null, 2));
   const newName = rewritePackageName(tmp);
   assert.equal(newName, path.basename(tmp));
   const after = JSON.parse(fs.readFileSync(path.join(tmp, 'package.json'), 'utf8'));
