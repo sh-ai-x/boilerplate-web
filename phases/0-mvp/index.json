@@ -87,8 +87,16 @@
       "step": 5,
       "name": "cloudflare-waf",
       "title": "Cloudflare WAF rules JSON + Turnstile config snippets for saas + shop",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "summary": "Cloudflare WAF rules JSON (6 rules covering rate limit, geo, scanner UA, admin challenge) + Turnstile config docs for saas+toss-billing and shop+toss-pay + portfolio no-Turnstile note. All 7 ACs PASS",
+      "started_at": "2026-07-17T00:33:30Z",
+      "completed_at": "2026-07-17T00:34:30Z",
+      "branch": "plan/boilerplate-cli-step5",
+      "commits": [
+        "1c75117",
+        "c0edcce"
+      ]
     },
     {
       "step": 6,
