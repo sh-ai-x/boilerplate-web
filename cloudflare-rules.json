@@ -1,0 +1,44 @@
+[
+  {
+    "description": "Rate-limit saas billing Edge Function (toss-billing) to 10 req/min/IP. Deployed at /functions/v1/billing.",
+    "expression": "(http.request.uri.path eq \"/functions/v1/billing\") and (rate_limit(10, 60s) > 0)",
+    "action": "block",
+    "priority": 100,
+    "enabled": true
+  },
+  {
+    "description": "Rate-limit shop single-payment Edge Function (toss-pay) to 10 req/min/IP",
+    "expression": "(http.request.uri.path eq \"/functions/v1/toss-pay\") and (rate_limit(10, 60s) > 0)",
+    "action": "block",
+    "priority": 110,
+    "enabled": true
+  },
+  {
+    "description": "Block requests with no User-Agent to any Edge Function path (basic bot filter)",
+    "expression": "(http.request.uri.path starts_with \"/functions/v1/\") and (not http.user_agent)",
+    "action": "block",
+    "priority": 120,
+    "enabled": true
+  },
+  {
+    "description": "Geo-allowlist Edge Function paths: KR + US + JP only (configurable). Replace placeholders as needed.",
+    "expression": "(http.request.uri.path starts_with \"/functions/v1/\") and (not ip.geoip.country in {\"KR\" \"US\" \"JP\"})",
+    "action": "block",
+    "priority": 130,
+    "enabled": true
+  },
+  {
+    "description": "Managed challenge on admin pages without cf_clearance cookie",
+    "expression": "(http.request.uri.path starts_with \"/admin/\") and (not http.cookie contains \"cf_clearance=\")",
+    "action": "managed_challenge",
+    "priority": 140,
+    "enabled": true
+  },
+  {
+    "description": "Block obvious malicious scanner UAs on all paths",
+    "expression": "(http.user_agent contains \"sqlmap\") or (http.user_agent contains \"nikto\") or (http.user_agent contains \"nmap\")",
+    "action": "block",
+    "priority": 150,
+    "enabled": true
+  }
+]
