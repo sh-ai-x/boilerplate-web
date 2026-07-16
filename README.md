@@ -1,37 +1,96 @@
 # boilerplate-web
 
-Web boilerplate starter.
+> `npx create-boilerplate-web <folder> --type=<saas|shop|portfolio>` —
+> scaffold a Next.js + Supabase + Cloudflare + Toss template into a target folder.
+
+This repo is the source-of-truth for the `create-boilerplate-web` CLI and
+three independently-buildable templates. Pick the type that matches what you
+are shipping, scaffold it into a fresh folder, and customize from there.
 
 ## What this is
 
-A minimal, opinionated scaffold for shipping web apps with first-class
-dev tooling. Combines a strict Claude/Codex rule source (`CLAUDE.md` /
-`AGENTS.md`), a TDD/SDD-driven phase plan (`PRD.md` + `phases/`),
-and a GitHub Actions CI pipeline installed by `dev-kit:ci-setup`.
+- **A smart-clone CLI** that targets a sub-folder of this repo via `degit`.
+  No full-repo clones. Type validation happens before the network call.
+- **Three production-grade templates** that share a common `_shared` infra
+  package (Supabase client factories, Google-OAuth-only auth, optional
+  Cloudflare Turnstile component).
+- **A Toss-only payment path** with the Toss API call isolated to Supabase
+  Edge Functions. Prices live in a database table; clients can never inject
+  an amount.
 
-## Repository layout
+## Quick start
 
-| Path | Purpose |
-| --- | --- |
-| `CLAUDE.md`, `AGENTS.md` | Project rule source (shared between Claude Code and Codex) |
-| `PRD.md` | Single source of truth for product requirements |
-| `phases/<n>-<slug>/` | Per-phase plans, step outputs, and decision logs |
-| `.dev-kit/ci-config.json` | Marker that gates `dev-kit:build`; written by `ci-setup` |
-| `.github/workflows/` | CI, review, and auto-fix workflows |
-| `scripts/` | Local CI entrypoints mirrored from `.github/workflows/` |
-| `tests/` | Regression tests for the rule hooks |
+```bash
+# SaaS template — recurring billing via Toss billing-key
+npx create-boilerplate-web my-saas --type=saas
 
-## Local CI
+# Shop template — single-payment + encrypted shipping via pgsodium
+npx create-boilerplate-web my-shop --type=shop
+
+# Portfolio template — MDX portfolio + Google-auth guestbook (no payment)
+npx create-boilerplate-web my-portfolio --type=portfolio
+```
+
+Each command clones `templates/<type>` from this repo (not the full repo),
+rewrites the target `package.json` name to the folder basename, runs
+`npm install`, and prints a numbered Supabase / Cloudflare setup checklist.
+
+## Template matrix
+
+| Template   | Auth          | Payment                | Encryption      | Turnstile | WAF rules |
+|------------|---------------|------------------------|-----------------|-----------|-----------|
+| `saas`     | Google OAuth  | Toss billing-key       | (DB at-rest)    | Yes       | Yes       |
+| `shop`     | Google OAuth  | Toss single-payment    | pgsodium TDE    | Yes       | Yes       |
+| `portfolio`| Google OAuth  | — (none)               | —               | No        | No        |
+
+## Env-var matrix
+
+| Env var                          | Used by                  | Required?           |
+|----------------------------------|--------------------------|---------------------|
+| `NEXT_PUBLIC_SUPABASE_URL`       | all 3 templates          | Yes                 |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | all 3 templates          | Yes                 |
+| `SUPABASE_SERVICE_ROLE_KEY`      | saas, shop (admin paths) | Yes                 |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | saas, shop               | saas+shop only      |
+| `TURNSTILE_SECRET_KEY`           | saas, shop               | saas+shop only      |
+| `TOSS_SECRET_KEY`                | saas, shop               | saas+shop only      |
+| `TOSS_AUTH_KEY`                  | saas                     | saas only           |
+
+## Architecture
 
 ```
-bash scripts/ci-local.sh    # validate + test + (act -l if installed)
+                       ┌─────────────────┐
+   Browser  ────HTTPS──│   Next.js app   │  (Vercel / Cloudflare Pages)
+                       │  /pricing, etc. │
+                       └────────┬────────┘
+                                │ service-role / user JWT
+                                ▼
+                       ┌─────────────────┐
+                       │  Supabase Edge  │  (Deno runtime)
+                       │  Function       │  ──→ Toss Payments API
+                       │  billing | pay  │  ──→ Cloudflare Turnstile verify
+                       └────────┬────────┘
+                                │
+                                ▼
+                       ┌─────────────────┐
+                       │  Supabase       │
+                       │  Postgres + RLS │
+                       └─────────────────┘
+                                ▲
+                                │ WAF: rate-limit, geo, scanner-UA
+                       ┌────────┴────────┐
+                       │   Cloudflare    │  (WAF + Turnstile widget)
+                       └─────────────────┘
 ```
 
-## CI readiness
+## Security non-goals (links)
 
-`/dev-kit:ci-doctor` audits whether the three workflow files, the
-provider marker, the secrets, and `gh auth` are all in place. Run it
-after `bootstrap-full` or before opening the first PR.
+Per the PRD non-goals, this boilerplate deliberately does **NOT** include:
+
+1. Email/password or magic-link authentication. Google OAuth is the only
+   sign-in path. See `.prd/decision-log.md` §3 non-goal #1.
+2. Payment providers beyond Toss. See `.prd/decision-log.md` §3 non-goal #2.
+3. Multi-tenant Supabase. Each user brings their own Supabase project. See
+   `.prd/decision-log.md` §3 non-goal #3.
 
 ## License
 
