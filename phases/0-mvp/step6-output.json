@@ -1,0 +1,19 @@
+{
+  "step": 6,
+  "name": "deploy-guide",
+  "title": "Root README + per-template deployment READMEs (Supabase, Cloudflare, Google OAuth, Toss)",
+  "exit_code": 0,
+  "stdout": "AC1 root README > 2000 chars: PASS (4756 bytes)\nAC2 every template README has 'supabase setup': PASS (saas, shop, portfolio)\nAC3 every template README mentions 'supabase link': PASS (saas, shop, portfolio)\nAC4 env-var matrix covers 4 env keys: PASS\nAC5 no real-looking secrets: PASS\nAC6 portfolio says no Toss / no Cloudflare WAF: PASS\nAC7 every template README mentions Vercel or Cloudflare Pages: PASS (saas, shop, portfolio)",
+  "stderr": "",
+  "duration_seconds": 5.0,
+  "timestamp": "2026-07-17T00:35:00Z",
+  "verification": {
+    "AC1_root_readme_size": "PASS (4756)",
+    "AC2_supabase_setup_section": "PASS",
+    "AC3_supabase_link_mentioned": "PASS",
+    "AC4_env_var_matrix": "PASS",
+    "AC5_no_real_secrets": "PASS",
+    "AC6_portfolio_no_toss_no_waf": "PASS",
+    "AC7_vercel_or_cloudflare_pages": "PASS"
+  }
+}
