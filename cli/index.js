@@ -14,15 +14,16 @@ const {
 const { rewritePackageName } = require('./lib/rewrite');
 const { printPostInstallChecklist } = require('./lib/post-install');
 
-const USAGE = `Usage: create-boilerplate-web <targetFolder> --type=<${VALID_TYPES.join('|')}> [--force] [--allow-scripts] [--yes]`;
+const USAGE = `Usage: create-boilerplate-web <targetFolder> --type=<${VALID_TYPES.join('|')}> [--overwrite] [--yes] [--force] [--allow-scripts]`;
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const targetFolder = args[0];
+  const positional = args[0];
   let type = null;
-  let force = false;
+  let overwrite = false;
   let allowScripts = false;
   let yes = false;
+  let force = false;
 
   for (const arg of args.slice(1)) {
     if (arg === '--help' || arg === '-h') {
@@ -37,20 +38,37 @@ function parseArgs(argv) {
     if (arg.startsWith('--type=')) {
       type = arg.slice('--type='.length);
     }
-    if (arg === '--force') force = true;
+    if (arg === '--overwrite') overwrite = true;
     if (arg === '--allow-scripts') allowScripts = true;
     if (arg === '--yes' || arg === '-y') yes = true;
+    if (arg === '--force') force = true;
   }
 
-  return { targetFolder, type, force, allowScripts, yes };
+  // Reject --prefixed tokens as the positional target. The review found
+  // `--type=foo` could be misread as the target folder if the user forgot
+  // the --type= prefix on a flag (defensive parsing).
+  if (typeof positional === 'string' && positional.startsWith('--')) {
+    process.stderr.write(
+      `Error: target folder must not start with "--" (got "${positional}").\n${USAGE}\n`
+    );
+    process.exit(1);
+  }
+
+  return { targetFolder: positional, type, overwrite, allowScripts, yes, force };
 }
 
-function assertSafeTarget(targetFolder) {
+function assertSafeTarget(targetFolder, { allowUnsafe }) {
   // Reject paths that escape the current working directory unless --force is set.
   const cwd = process.cwd();
   const resolved = path.resolve(targetFolder);
   const rel = path.relative(cwd, resolved);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+  // Catches: ../../etc/foo (rel starts with ..), /etc/foo (rel is absolute),
+  // AND "." / "./" (rel === ''), which would otherwise let the caller
+  // accidentally clean up their own CWD.
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    if (allowUnsafe) {
+      return resolved;
+    }
     throw new Error(
       `Refusing to write outside the current directory: "${targetFolder}" resolves to "${resolved}". Pass --force to override.`
     );
@@ -59,6 +77,9 @@ function assertSafeTarget(targetFolder) {
   try {
     const stat = fs.lstatSync(resolved);
     if (stat.isSymbolicLink()) {
+      if (allowUnsafe) {
+        return resolved;
+      }
       throw new Error(
         `Refusing to write through a symlink: "${resolved}". Pass --force to override.`
       );
@@ -69,16 +90,19 @@ function assertSafeTarget(targetFolder) {
   return resolved;
 }
 
+function isInsideCwd(target) {
+  const cwd = process.cwd();
+  const rel = path.relative(cwd, path.resolve(target));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 async function confirmIfNonEmpty(targetFolder, yes) {
-  // Re-degit with force:false in downloadTemplate already protects against
-  // silent overwrite. This is the human-facing gate for "target dir already
-  // has files we care about".
   let entries = [];
   try {
     entries = fs.readdirSync(targetFolder);
   } catch (e) {
     if (e.code !== 'ENOENT') throw e;
-    return; // doesn't exist yet
+    return;
   }
   if (entries.length === 0) return;
   if (yes) {
@@ -102,8 +126,6 @@ async function confirmIfNonEmpty(targetFolder, yes) {
 }
 
 function installDeps(targetFolder, { allowScripts }) {
-  // Default to --ignore-scripts to block postinstall RCE from cloned templates
-  // (A03-5). Opt-in --allow-scripts re-enables lifecycle scripts.
   const flags = ['--no-audit', '--no-fund'];
   if (!allowScripts) flags.push('--ignore-scripts');
   try {
@@ -111,13 +133,21 @@ function installDeps(targetFolder, { allowScripts }) {
       cwd: path.resolve(targetFolder),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-  } catch (e) {
+  } catch (_) {
     throw new Error(`npm install failed in ${targetFolder}`);
   }
 }
 
-function cleanup(targetFolder) {
-  // Best-effort cleanup on failure (A10-2). Never throws.
+function cleanup(targetFolder, { unsafeAllowed }) {
+  // Best-effort cleanup on failure. ALWAYS re-validate the target is inside
+  // CWD before rmSync — never trust the caller. unsafeAllowed is reserved
+  // for edge cases where the user explicitly bypassed the safety gate.
+  if (!unsafeAllowed && !isInsideCwd(targetFolder)) {
+    process.stderr.write(
+      `Warning: refusing to clean up "${targetFolder}" because it is outside the current working directory.\n`
+    );
+    return;
+  }
   try {
     fs.rmSync(targetFolder, { recursive: true, force: true });
   } catch (_) {
@@ -126,7 +156,7 @@ function cleanup(targetFolder) {
 }
 
 async function main() {
-  const { targetFolder, type, force, allowScripts, yes } = parseArgs(process.argv);
+  const { targetFolder, type, overwrite, allowScripts, yes, force } = parseArgs(process.argv);
 
   if (!targetFolder) {
     process.stderr.write(`Error: missing <targetFolder>\n${USAGE}\n`);
@@ -144,25 +174,30 @@ async function main() {
     process.exit(1);
   }
 
-  const safeTarget = force ? path.resolve(targetFolder) : assertSafeTarget(targetFolder);
+  const safeTarget = assertSafeTarget(targetFolder, { allowUnsafe: force });
 
   await confirmIfNonEmpty(safeTarget, yes);
 
+  // --overwrite enables degit force:true. --force only bypasses CWD safety.
   try {
-    // downloadTemplate is force:false by default; pass force to override.
-    await downloadTemplate(type, safeTarget, { force });
+    await downloadTemplate(type, safeTarget, { force: overwrite });
   } catch (e) {
-    cleanup(safeTarget);
+    cleanup(safeTarget, { unsafeAllowed: force });
     throw e;
   }
 
-  const newName = rewritePackageName(safeTarget);
-  process.stdout.write(`Renamed package.json "name" to "${newName}"\n`);
+  try {
+    const newName = rewritePackageName(safeTarget);
+    process.stdout.write(`Renamed package.json "name" to "${newName}"\n`);
+  } catch (e) {
+    cleanup(safeTarget, { unsafeAllowed: force });
+    throw e;
+  }
 
   try {
     installDeps(safeTarget, { allowScripts });
   } catch (e) {
-    cleanup(safeTarget);
+    cleanup(safeTarget, { unsafeAllowed: force });
     throw e;
   }
 
