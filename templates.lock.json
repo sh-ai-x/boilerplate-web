@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "ref": "74ac31591bcff58f2ccaa2331983e285b57adb36",
+  "source": "github:sanghee-dev/boilerplate-web",
+  "templates": {
+    "saas": "templates/saas",
+    "shop": "templates/shop",
+    "portfolio": "templates/portfolio"
+  },
+  "checksum_algorithm": "sha256",
+  "notes": [
+    "ref MUST be an immutable commit SHA, not a tag or branch. Tags can be re-pointed.",
+    "Bump this file on each release: pin to the SHA of the merge commit that lands the templates.",
+    "Consumers (the CLI) read this file at runtime to avoid drift between CLI version and template contents."
+  ]
+}

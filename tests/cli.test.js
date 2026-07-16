@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
-const { validateType, buildSrc, downloadTemplate, VALID_TYPES, REF } =
+const { validateType, buildSrc, downloadTemplate, VALID_TYPES } =
   require('../cli/lib/target-download');
 const { POST_INSTALL_STEPS } = require('../cli/lib/post-install');
 
@@ -42,30 +42,37 @@ test('post-install checklist mentions supabase link, db push, functions deploy',
 });
 
 // === buildSrc — degit ref pinning ===
-test('buildSrc pins the ref (A06-5: ref pinning) — no unpinned source', () => {
+test('buildSrc pins the ref to templates.lock.json SHA (A06-5, behavioral)', () => {
+  const lock = require('../templates.lock.json');
+  // The ref must be an immutable 40-char SHA, not a tag.
+  assert.match(lock.ref, /^[0-9a-f]{40}$/, 'lock ref must be a 40-char commit SHA');
+  // Every built src must include the SHA.
   for (const t of VALID_TYPES) {
     const src = buildSrc(t);
-    // github:org/repo#ref/templates/<type>
-    assert.match(src, /^github:sanghee-dev\/boilerplate-web#v\d+\.\d+\.\d+\/templates\//);
+    assert.match(
+      src,
+      new RegExp(`^github:sanghee-dev/boilerplate-web#${lock.ref}/templates/${t}$`),
+      `${t} must use the pinned SHA in source path`
+    );
   }
-  assert.ok(REF && REF.length > 0, 'REF must be set');
+  // And not a tag.
+  for (const t of VALID_TYPES) {
+    const src = buildSrc(t);
+    assert.doesNotMatch(src, /#v\d+\.\d+\.\d+\//, `${t} must not use a version tag`);
+  }
 });
 
-test('buildSrc REF is overridable via DEGIT_REF env', () => {
-  const prev = process.env.DEGIT_REF;
-  try {
-    process.env.DEGIT_REF = 'deadbeef';
-    // Re-require to pick up the new env. (Module already cached so this is a
-    // partial check; we assert that the env var name is read in source.)
-    const src = require('fs').readFileSync(
-      path.join(__dirname, '..', 'cli/lib/target-download.js'), 'utf8'
-    );
-    assert.match(src, /DEGIT_REF/);
-    assert.match(src, /process\.env/);
-  } finally {
-    if (prev === undefined) delete process.env.DEGIT_REF;
-    else process.env.DEGIT_REF = prev;
-  }
+test('buildSrc reads ref from templates.lock.json (single source of truth)', () => {
+  // The CLI version lives in package.json. The template ref lives in
+  // templates.lock.json. They MUST be independent files to avoid drift.
+  const lockPath = path.join(__dirname, '..', 'templates.lock.json');
+  const pkgPath = path.join(__dirname, '..', 'package.json');
+  assert.ok(fs.existsSync(lockPath), 'templates.lock.json must exist');
+  assert.ok(fs.existsSync(pkgPath), 'package.json must exist');
+  // buildSrc must not have a hardcoded tag/branch as a fallback.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'cli/lib/target-download.js'), 'utf8');
+  assert.match(src, /templates\.lock\.json/, 'must read templates.lock.json');
+  assert.match(src, /\[0-9a-f\]\{40\}/, 'must validate the ref is a 40-char SHA');
 });
 
 // === downloadTemplate — behavioral test with injected degit impl ===
@@ -103,14 +110,19 @@ test('downloadTemplate respects opts.force === true (A06-3, behavioral)', async 
   assert.equal(capturedOpts.force, true, 'force:true must propagate to degit');
 });
 
-test('downloadTemplate builds pinned-ref source path (A06-5, behavioral)', async () => {
+test('downloadTemplate builds pinned-SHA source path (A06-5, behavioral)', async () => {
+  const lock = require('../templates.lock.json');
   let capturedSrc = null;
   const capture = (src, opts) => {
     capturedSrc = src;
     return { clone: () => Promise.resolve() };
   };
   await downloadTemplate('shop', '/tmp/cbw-q', {}, capture);
-  assert.match(capturedSrc, /^github:sanghee-dev\/boilerplate-web#v\d+\.\d+\.\d+\/templates\/shop$/);
+  assert.match(
+    capturedSrc,
+    new RegExp(`^github:sanghee-dev/boilerplate-web#${lock.ref}/templates/shop$`),
+    'must use the pinned SHA from templates.lock.json'
+  );
 });
 
 // === CLI: --prefixed token as positional is rejected (parseArgs) ===

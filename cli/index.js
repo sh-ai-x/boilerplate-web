@@ -26,15 +26,6 @@ function parseArgs(argv) {
   let force = false;
 
   for (const arg of args.slice(1)) {
-    if (arg === '--help' || arg === '-h') {
-      process.stdout.write(USAGE + '\n');
-      process.exit(0);
-    }
-    if (arg === '--version' || arg === '-v') {
-      const pkg = require('../package.json');
-      process.stdout.write(`${pkg.name} ${pkg.version}\n`);
-      process.exit(0);
-    }
     if (arg.startsWith('--type=')) {
       type = arg.slice('--type='.length);
     }
@@ -44,9 +35,13 @@ function parseArgs(argv) {
     if (arg === '--force') force = true;
   }
 
-  // Reject --prefixed tokens as the positional target. The review found
-  // `--type=foo` could be misread as the target folder if the user forgot
-  // the --type= prefix on a flag (defensive parsing).
+  // --help / --version are flags, not positional targets. The for-loop above
+  // already handled them; if positional still starts with -- it's a real
+  // misuse (e.g. user passed --type=saas as the target).
+
+
+  // Reject --prefixed tokens as the positional target (defensive: catches
+  // `cli --type=saas /some/path` where the user forgot the path arg).
   if (typeof positional === 'string' && positional.startsWith('--')) {
     process.stderr.write(
       `Error: target folder must not start with "--" (got "${positional}").\n${USAGE}\n`
@@ -57,43 +52,62 @@ function parseArgs(argv) {
   return { targetFolder: positional, type, overwrite, allowScripts, yes, force };
 }
 
-function assertSafeTarget(targetFolder, { allowUnsafe }) {
-  // Reject paths that escape the current working directory unless --force is set.
-  const cwd = process.cwd();
-  const resolved = path.resolve(targetFolder);
-  const rel = path.relative(cwd, resolved);
-  // Catches: ../../etc/foo (rel starts with ..), /etc/foo (rel is absolute),
-  // AND "." / "./" (rel === ''), which would otherwise let the caller
-  // accidentally clean up their own CWD.
-  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
-    if (allowUnsafe) {
-      return resolved;
-    }
-    throw new Error(
-      `Refusing to write outside the current directory: "${targetFolder}" resolves to "${resolved}". Pass --force to override.`
-    );
-  }
-  // Reject symlinks to avoid surprise overwrites.
-  try {
-    const stat = fs.lstatSync(resolved);
-    if (stat.isSymbolicLink()) {
-      if (allowUnsafe) {
-        return resolved;
-      }
-      throw new Error(
-        `Refusing to write through a symlink: "${resolved}". Pass --force to override.`
-      );
-    }
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
-  }
-  return resolved;
-}
-
 function isInsideCwd(target) {
   const cwd = process.cwd();
   const rel = path.relative(cwd, path.resolve(target));
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function hasIntermediateSymlink(target) {
+  // Walk every path component and lstat each one. If any is a symlink,
+  // the target is reachable through a symlink chain we cannot trust.
+  const cwd = process.cwd();
+  const resolved = path.resolve(target);
+  // We walk from the resolved path's parents back to the CWD.
+  const rel = path.relative(cwd, resolved);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    // Out of CWD — caller should already have rejected this; we still
+    // conservatively report "intermediate symlink possible".
+    return true;
+  }
+  let acc = cwd;
+  for (const part of rel.split(path.sep)) {
+    acc = path.join(acc, part);
+    try {
+      const st = fs.lstatSync(acc);
+      if (st.isSymbolicLink()) return true;
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+      // Missing component — fine, no symlink to worry about yet.
+    }
+  }
+  return false;
+}
+
+function assertSafeTarget(targetFolder, { allowUnsafe }) {
+  const cwd = process.cwd();
+  const resolved = path.resolve(targetFolder);
+  const rel = path.relative(cwd, resolved);
+
+  // Catch: target IS cwd, target is parent-relative, target is absolute.
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    if (allowUnsafe) return resolved;
+    throw new Error(
+      `Refusing to write outside the current directory: "${targetFolder}" resolves to "${resolved}". Pass --force to override.`
+    );
+  }
+
+  // Reject any path that traverses an intermediate symlink — the resolved
+  // path may be inside CWD, but the user could be tricked into writing
+  // through a symlink to an unrelated location.
+  if (hasIntermediateSymlink(resolved)) {
+    if (allowUnsafe) return resolved;
+    throw new Error(
+      `Refusing to write through a symlinked component: "${resolved}". Pass --force to override.`
+    );
+  }
+
+  return resolved;
 }
 
 async function confirmIfNonEmpty(targetFolder, yes) {
@@ -138,10 +152,25 @@ function installDeps(targetFolder, { allowScripts }) {
   }
 }
 
-function cleanup(targetFolder, { unsafeAllowed }) {
-  // Best-effort cleanup on failure. ALWAYS re-validate the target is inside
-  // CWD before rmSync — never trust the caller. unsafeAllowed is reserved
-  // for edge cases where the user explicitly bypassed the safety gate.
+/**
+ * Clean up the scaffolded target on failure.
+ *
+ * SAFETY: only deletes the target if it did NOT exist before the run. If the
+ * target was pre-existing (even empty), we leave it alone — the user has
+ * files there that we have no right to rmSync. This is the "never delete
+ * pre-existing user files" rule (A10-2 / review critical).
+ */
+function cleanup(targetFolder, opts) {
+  const { unsafeAllowed, targetPreExisted } = opts;
+
+  if (targetPreExisted) {
+    // The target was there before we ran. We don't know which files we
+    // created vs which were already there, so we don't delete anything.
+    process.stderr.write(
+      `Warning: target "${targetFolder}" pre-existed; leaving any partial scaffold in place.\n`
+    );
+    return;
+  }
   if (!unsafeAllowed && !isInsideCwd(targetFolder)) {
     process.stderr.write(
       `Warning: refusing to clean up "${targetFolder}" because it is outside the current working directory.\n`
@@ -151,11 +180,24 @@ function cleanup(targetFolder, { unsafeAllowed }) {
   try {
     fs.rmSync(targetFolder, { recursive: true, force: true });
   } catch (_) {
-    // ignore — we tried
+    // ignore — best effort
   }
 }
 
 async function main() {
+  // Handle info flags first so the user can run `--help` or `--version`
+  // without supplying a target.
+  for (const a of process.argv.slice(2)) {
+    if (a === '--help' || a === '-h') {
+      process.stdout.write(USAGE + '\n');
+      return;
+    }
+    if (a === '--version' || a === '-v') {
+      const pkg = require('../package.json');
+      process.stdout.write(`${pkg.name} ${pkg.version}\n`);
+      return;
+    }
+  }
   const { targetFolder, type, overwrite, allowScripts, yes, force } = parseArgs(process.argv);
 
   if (!targetFolder) {
@@ -176,13 +218,24 @@ async function main() {
 
   const safeTarget = assertSafeTarget(targetFolder, { allowUnsafe: force });
 
+  // Track whether the target existed BEFORE we did anything. The cleanup()
+  // policy depends on this.
+  let targetPreExisted = false;
+  try {
+    const stat = fs.statSync(safeTarget);
+    if (stat.isDirectory()) targetPreExisted = true;
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+
   await confirmIfNonEmpty(safeTarget, yes);
 
-  // --overwrite enables degit force:true. --force only bypasses CWD safety.
+  const cleanupOpts = { unsafeAllowed: force, targetPreExisted };
+
   try {
     await downloadTemplate(type, safeTarget, { force: overwrite });
   } catch (e) {
-    cleanup(safeTarget, { unsafeAllowed: force });
+    cleanup(safeTarget, cleanupOpts);
     throw e;
   }
 
@@ -190,14 +243,14 @@ async function main() {
     const newName = rewritePackageName(safeTarget);
     process.stdout.write(`Renamed package.json "name" to "${newName}"\n`);
   } catch (e) {
-    cleanup(safeTarget, { unsafeAllowed: force });
+    cleanup(safeTarget, cleanupOpts);
     throw e;
   }
 
   try {
     installDeps(safeTarget, { allowScripts });
   } catch (e) {
-    cleanup(safeTarget, { unsafeAllowed: force });
+    cleanup(safeTarget, cleanupOpts);
     throw e;
   }
 
