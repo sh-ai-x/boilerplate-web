@@ -74,3 +74,4 @@ behavioral (no source-text regex).
 - Review: **Verdict: Approve** (no criticals, no majors, no minors)
 - Security: pass (2 fixed in iter 9: A09 redact, A06 TTY guard)
 - Tests: 30/30 pass (`node --test tests/cli.test.js`)
+
