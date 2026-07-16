@@ -27,8 +27,16 @@
       "step": 1,
       "name": "shared-infra",
       "title": "Shared infra: env templates, Supabase client wrapper, Google-OAuth-only auth UI, Turnstile component",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "summary": "Shared infra: pnpm-workspace, @boilerplate-web/shared, Supabase client factories, Google-only auth UI, Turnstile w/ dev escape hatch, .env.example with 4 keys. AC1-AC6 all PASS; pnpm build=0, test=5/5",
+      "started_at": "2026-07-17T00:22:00Z",
+      "completed_at": "2026-07-17T00:23:00Z",
+      "branch": "plan/boilerplate-cli-step1",
+      "commits": [
+        "fa27df6",
+        "bdcc775"
+      ]
     },
     {
       "step": 2,
