@@ -1,0 +1,19 @@
+{
+  "step": 0,
+  "name": "cli-scaffold",
+  "title": "CLI scaffold with degit sub-folder targeting + post-install hook",
+  "exit_code": 0,
+  "stdout": "AC3 invalid-type rejection: exit 1, /tmp/cbw-test-bad NOT created (PASS)\nAC4 sub-folder targeting: cli/.git absent, cli/AGENTS.md absent (PASS)\nAC5 post-install contains 'supabase link': PASS\nAC2-equivalent (rewrite preserves deps/scripts): PASS — {next:^14.0.0}, {dev:next dev} intact\nnode --test tests/cli.test.js: 3/3 pass\nNetwork ACs (AC1 degit clone, AC2 npm install) deferred to CI per worktree isolation.",
+  "stderr": "",
+  "duration_seconds": 0.5,
+  "timestamp": "2026-07-17T00:21:00Z",
+  "verification": {
+    "AC3_invalid_type_pre_network": "PASS",
+    "AC4_subfolder_targeting_static": "PASS",
+    "AC5_post_install_supabase_link": "PASS",
+    "AC7_rewrite_preserves_deps": "PASS",
+    "node_test_count": "3/3",
+    "AC1_degit_clone": "DEFERRED_TO_CI",
+    "AC2_npm_install_rewrite_check": "DEFERRED_TO_CI"
+  }
+}
