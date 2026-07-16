@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "phase": "0-mvp",
+  "project": "boilerplate-web",
+  "created_at": "2026-07-16T00:00:00Z",
+  "worktree": "plan/boilerplate-cli",
+  "ambiguity_score": 2,
+  "value_score": 9.375,
+  "evidence_count": 3,
+  "steps": [
+    { "step": 0, "name": "cli-scaffold", "title": "CLI scaffold with degit sub-folder targeting + post-install hook", "status": "pending", "ambiguity_delta": 0.0 },
+    { "step": 1, "name": "shared-infra", "title": "Shared infra: env templates, Supabase client wrapper, Google-OAuth-only auth UI, Turnstile component", "status": "pending", "ambiguity_delta": 0.0 },
+    { "step": 2, "name": "template-saas", "title": "saas template: plans/subscriptions schema, admin pricing UI, Toss billing-key Edge Function", "status": "pending", "ambiguity_delta": 0.0 },
+    { "step": 3, "name": "template-shop", "title": "shop template: products/orders schema (pgsodium TDE on shipping), admin pricing UI, Toss single-payment Edge Function", "status": "pending", "ambiguity_delta": 0.0 },
+    { "step": 4, "name": "template-portfolio", "title": "portfolio template: portfolio_items + guestbook schema, MDX render, Google-auth write — no payment, no Turnstile", "status": "pending", "ambiguity_delta": 0.0 },
+    { "step": 5, "name": "cloudflare-waf", "title": "Cloudflare WAF rules JSON + Turnstile config snippets for saas + shop", "status": "pending", "ambiguity_delta": 0.0 },
+    { "step": 6, "name": "deploy-guide", "title": "Root README + per-template deployment READMEs (Supabase, Cloudflare, Google OAuth, Toss)", "status": "pending", "ambiguity_delta": 0.0 }
+  ]
+}

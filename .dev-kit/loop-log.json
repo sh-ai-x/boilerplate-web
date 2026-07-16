@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0.0",
+  "phase": "0-mvp",
+  "project": "boilerplate-web",
+  "safety_valve": 8,
+  "user_interrupt": false,
+  "cycles": [
+    {
+      "cycle": 1,
+      "gate": 2,
+      "narrowed_delta": {
+        "evidence": { "before": 0, "after": 3, "delta": 3 },
+        "value_score": { "before": 0.0, "after": 9.375, "delta": 9.375 },
+        "ambiguity": { "before": 10, "after": 10, "delta": 0 }
+      },
+      "convergence": {
+        "evidence_count_pass": true,
+        "value_score_pass": true,
+        "ambiguity_pass": false
+      },
+      "next_action": "ambiguity loop iter 1 — ask scope"
+    },
+    {
+      "cycle": 2,
+      "gate": 2,
+      "narrowed_delta": {
+        "ambiguity": { "before": 10, "after": 8, "delta": -2 }
+      },
+      "asked": "scope (smallest shippable version)",
+      "next_action": "ambiguity loop iter 2 — ask metric"
+    },
+    {
+      "cycle": 3,
+      "gate": 2,
+      "narrowed_delta": {
+        "ambiguity": { "before": 8, "after": 7, "delta": -1 }
+      },
+      "asked": "metric (single success number)",
+      "next_action": "ambiguity loop iter 3 — ask kill criteria"
+    },
+    {
+      "cycle": 4,
+      "gate": 2,
+      "narrowed_delta": {
+        "ambiguity": { "before": 7, "after": 6, "delta": -1 }
+      },
+      "asked": "kill trigger",
+      "next_action": "ambiguity loop iter 4 — ask first user / first click"
+    },
+    {
+      "cycle": 5,
+      "gate": 2,
+      "narrowed_delta": {
+        "ambiguity": { "before": 6, "after": 4, "delta": -2 }
+      },
+      "asked": "first user + first click",
+      "next_action": "ambiguity loop iter 5 — ask pain cadence"
+    },
+    {
+      "cycle": 6,
+      "gate": 2,
+      "narrowed_delta": {
+        "ambiguity": { "before": 4, "after": 2, "delta": -2 }
+      },
+      "asked": "pain cadence",
+      "convergence": {
+        "evidence_count_pass": true,
+        "value_score_pass": true,
+        "ambiguity_pass": true
+      },
+      "next_action": "gate 3 — non-goals (auto-derive since user deferred)"
+    }
+  ],
+  "final_status": "pass",
+  "emitted_at": "2026-07-16T00:00:00Z"
+}
