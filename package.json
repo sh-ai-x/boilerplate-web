@@ -1,0 +1,35 @@
+{
+  "name": "create-boilerplate-web",
+  "version": "0.1.0",
+  "description": "Scaffold a Next.js + Supabase + Cloudflare + Toss template (saas, shop, or portfolio) into a target folder.",
+  "bin": {
+    "create-boilerplate-web": "cli/index.js"
+  },
+  "type": "commonjs",
+  "main": "cli/index.js",
+  "files": [
+    "cli",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "keywords": [
+    "boilerplate",
+    "nextjs",
+    "supabase",
+    "cloudflare",
+    "toss",
+    "saas",
+    "shop",
+    "portfolio"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "degit": "^2.8.4"
+  },
+  "license": "MIT"
+}
