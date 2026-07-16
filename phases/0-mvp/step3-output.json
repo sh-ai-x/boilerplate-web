@@ -1,0 +1,18 @@
+{
+  "step": 3,
+  "name": "template-shop",
+  "title": "shop template: products/orders schema (pgsodium TDE on shipping), admin pricing UI, Toss single-payment Edge Function",
+  "exit_code": 0,
+  "stdout": "AC1 pnpm --filter shop build: exit 0\nAC2 shipping columns bytea: PASS\nAC3 pgsodium.crypto_aead_det_encrypt in function: PASS\nAC4 Edge Function ignores body.amount/price: PASS\nAC5 no 'toss' in shop/app/: PASS\nAC6 pnpm --filter shop test: 5/5 pass",
+  "stderr": "",
+  "duration_seconds": 60.0,
+  "timestamp": "2026-07-17T00:29:00Z",
+  "verification": {
+    "AC1_pnpm_build": "PASS",
+    "AC2_bytea_shipping": "PASS",
+    "AC3_pgsodium_encrypt": "PASS",
+    "AC4_edge_fn_ignores_body_amount": "PASS",
+    "AC5_no_toss_in_app": "PASS",
+    "AC6_pnpm_test_count": "5/5"
+  }
+}
