@@ -1,4 +1,5 @@
 {
+  "ci_review_provider_file": ".github/ci-review-provider.txt",
   "githooks": [
     ".githooks/pre-push"
   ],
@@ -9,15 +10,16 @@
     "hooks/lib/worktree-detect.sh",
     "hooks/hooks.json"
   ],
-  "installed_at": "2026-07-16T09:53:06Z",
+  "installed_at": "2026-07-16T11:45:11Z",
   "installed_by": "dev-kit:ci-setup",
   "installed_file_shas": {
-    ".claude/rules/git-workflow.md": "bcf33336c014478f18f2cb11469725e39212f585189133b0bab1e7d0668e87a7",
+    ".claude/rules/git-workflow.md": "f43b1840c9780fadd5f6af33765cd41589f4819e2e2f194ac5d7ef88daca1cb9",
     ".githooks/pre-push": "78a504cb40db1ba8dbdf3f8d5b08c4019cc1a38c29589082bc678008ecdd0e2e",
+    ".github/ci-review-provider.txt": "3d5a28b438b43269eba3a93694a27872ce8a40ac40a42aee98bfa25ab764b04a",
     ".github/workflows/auto-fix-pr.yml": "d0362d108c25bc2195083281d1d788cb397bb2befb4cafe9cdba9e8a91fc3af1",
     ".github/workflows/ci.yml": "cb3605c94ea01e3127cc7bdb7394901d40dff9563d30d3f6f1096155b0f14f19",
-    ".github/workflows/review.yml": "a7232bd04d746d1e329fc079a3b5b8ad8b2e7d2ba6bfc776f505374b2e0c469b",
-    ".gitignore": "bae17c79864b6f7e6a8eaa6911eddf55a21475ac2f69a0a67168557b4441d91a",
+    ".github/workflows/review.yml": "72f0da44ac29e94a018f59a00aea158407f384b5124d6305e976daa371d12e96",
+    ".gitignore": "111e64c8c9d588b47ae6a980878ad7fd51c5548d6a2363e874ed8277230ed76b",
     "hooks/hooks.json": "3c20e7a88d3c3a560198ecd2b4ec27c983173b1a06fb1c5829d55d9f2191df87",
     "hooks/lib/worktree-detect.sh": "724fe2d5d399f26862bd1109791927830eca6138e8ab9ec4a4227e06c14d73f3",
     "hooks/session-start-check.sh": "b48065b330eee424bff7e0b0fa11e86f8ae2b3b1f0fecf09fbf52629b32fe58e",
