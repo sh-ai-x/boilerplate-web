@@ -57,8 +57,16 @@
       "step": 3,
       "name": "template-shop",
       "title": "shop template: products/orders schema (pgsodium TDE on shipping), admin pricing UI, Toss single-payment Edge Function",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "summary": "shop template: products/orders/shipping_addresses(bytea via pgsodium)/shipping_keys + RLS, toss-pay Edge Function (ignores body amount, pgsodium-encrypts shipping, fetches price from DB), admin products UI, BuyButton. All 6 ACs PASS; pnpm build=0, test=5/5",
+      "started_at": "2026-07-17T00:27:30Z",
+      "completed_at": "2026-07-17T00:30:00Z",
+      "branch": "plan/boilerplate-cli-step3",
+      "commits": [
+        "993397b",
+        "702e78b"
+      ]
     },
     {
       "step": 4,
