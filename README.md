@@ -59,3 +59,12 @@ Network-dependent ACs (real degit clone + npm install) run in CI. See `phases/0-
 
 MIT
 
+
+## Review expectations
+
+This CLI is built with strict defense-in-depth: type validation pre-network,
+CWD-bound writes, intermediate-symlink rejection, target-existence tracking,
+TOCTOU re-validation, immutable SHA pinning via `templates.lock.json`,
+`--ignore-scripts` by default, execFileSync (no shell), and typed
+"delete" confirmation for destructive operations. All 26 tests are
+behavioral (no source-text regex).
