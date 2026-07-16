@@ -42,8 +42,16 @@
       "step": 2,
       "name": "template-saas",
       "title": "saas template: plans/subscriptions schema, admin pricing UI, Toss billing-key Edge Function",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "summary": "saas template: plans/subscriptions/payments + RLS, Toss billing-key Edge Function (ignores client amount, fetches from DB), admin pricing UI server-gated, pricing page. AC1/AC2/AC3/AC4/AC5 all PASS; AC6 deferred to CI",
+      "started_at": "2026-07-17T00:24:00Z",
+      "completed_at": "2026-07-17T00:27:00Z",
+      "branch": "plan/boilerplate-cli-step2",
+      "commits": [
+        "0a61da2",
+        "67bc77a"
+      ]
     },
     {
       "step": 3,
