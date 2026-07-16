@@ -7,21 +7,23 @@
     "hooks/worktree-guard.sh",
     "hooks/task-detector.sh",
     "hooks/session-start-check.sh",
+    "hooks/review-yml-isolation.sh",
     "hooks/lib/worktree-detect.sh",
     "hooks/hooks.json"
   ],
-  "installed_at": "2026-07-16T11:45:11Z",
+  "installed_at": "2026-07-16T15:01:00Z",
   "installed_by": "dev-kit:ci-setup",
   "installed_file_shas": {
-    ".claude/rules/git-workflow.md": "f43b1840c9780fadd5f6af33765cd41589f4819e2e2f194ac5d7ef88daca1cb9",
+    ".claude/rules/git-workflow.md": "3bd441c92a3e8fc9aa7025e4eecf115f4b867ca90d8d2d780a48a01b664b3521",
     ".githooks/pre-push": "78a504cb40db1ba8dbdf3f8d5b08c4019cc1a38c29589082bc678008ecdd0e2e",
     ".github/ci-review-provider.txt": "3d5a28b438b43269eba3a93694a27872ce8a40ac40a42aee98bfa25ab764b04a",
-    ".github/workflows/auto-fix-pr.yml": "d0362d108c25bc2195083281d1d788cb397bb2befb4cafe9cdba9e8a91fc3af1",
+    ".github/workflows/auto-fix-pr.yml": "53aec832c067f1cd539efe03d8fa218eaf95e5e616b57c5742595dd687ef721c",
     ".github/workflows/ci.yml": "cb3605c94ea01e3127cc7bdb7394901d40dff9563d30d3f6f1096155b0f14f19",
-    ".github/workflows/review.yml": "72f0da44ac29e94a018f59a00aea158407f384b5124d6305e976daa371d12e96",
+    ".github/workflows/review.yml": "92915058cac58b5f65eace8054c915189720dc22ca069407f2e0ffbeaeee2a72",
     ".gitignore": "111e64c8c9d588b47ae6a980878ad7fd51c5548d6a2363e874ed8277230ed76b",
-    "hooks/hooks.json": "3c20e7a88d3c3a560198ecd2b4ec27c983173b1a06fb1c5829d55d9f2191df87",
+    "hooks/hooks.json": "e986860079667aaa33e7591e4fb38692472868a0b8573365a3b3e78aef0f098e",
     "hooks/lib/worktree-detect.sh": "724fe2d5d399f26862bd1109791927830eca6138e8ab9ec4a4227e06c14d73f3",
+    "hooks/review-yml-isolation.sh": "688d9fca7b52163d82974629f24962bf48d50fff6c12582f57c45b59eebd29d5",
     "hooks/session-start-check.sh": "b48065b330eee424bff7e0b0fa11e86f8ae2b3b1f0fecf09fbf52629b32fe58e",
     "hooks/task-detector.sh": "d158b76d0dbe6536f4684f7b0dff6df06cac177d46f813c23c678b59f1413d67",
     "hooks/worktree-guard.sh": "9391ed71a09a2fc88de76b4991e027e1107605d94378d594496cc99bb3dfb0a2",
@@ -29,6 +31,7 @@
     "scripts/ci-local.sh": "ebca570b658809a9988b802969fd805a82bb7d512bcf9bb25a19ebd93c1206c4",
     "scripts/test.sh": "cf6d0302399403925db13866751beb540ab36a7c8f188526d7da1a44bea12ecf",
     "scripts/validate.py": "5d73d0386a9606e9a5b656e26d7c544b6d06c9248e3ebbc905e69dd2b57df0f3",
+    "tests/test_review_yml_isolation.py": "ce95e308084fc21a1e2bcd364ae866ff4f43a3fd0f6c3f05f7b4e77d023209fe",
     "tests/test_worktree_guard.py": "0d982e40e5a24652316effc5586fada579dc020ed5eec428e44616d22538fbec"
   },
   "rules": [
@@ -47,6 +50,7 @@
     "scripts/ci-local.sh"
   ],
   "tests": [
-    "tests/test_worktree_guard.py"
+    "tests/test_worktree_guard.py",
+    "tests/test_review_yml_isolation.py"
   ]
 }
