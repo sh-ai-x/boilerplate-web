@@ -237,6 +237,22 @@ test('cleanup deletes a non-pre-existing target (best effort)', () => {
 });
 
 // === installDeps ===
+test('redactStderr strips npm tokens, GitHub PATs, basic auth, userinfo URLs (A09, behavioral)', () => {
+  const { redactStderr } = require('../cli/lib/install-deps');
+  const sample = [
+    'npm ERR! code E401',
+    'npm ERR! Unable to authenticate, your authentication token seems to be invalid.',
+    'npm ERR! Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF',
+    'npm ERR! _authToken = npm_0000000000000000000000000000000000XXXX',
+    'npm ERR! Tried to download from https://user:pass@example.com/pkg.tgz',
+  ].join('\n');
+  const out = redactStderr(sample);
+  assert.doesNotMatch(out, /ghp_/, 'GitHub PAT must be redacted');
+  assert.doesNotMatch(out, /npm_[0-9A-Za-z]{36}/, 'npm token must be redacted');
+  assert.doesNotMatch(out, /user:pass@/, 'userinfo URL must be redacted');
+  assert.match(out, /REDACTED/);
+});
+
 test('installDeps uses execFileSync (no shell injection) — behavioral via missing dir', () => {
   // Point cwd at a non-existent dir; installDeps should throw with a clear
   // error (the npm install line is built from args, not from a shell string).
@@ -265,6 +281,20 @@ test('cli --version prints name and version', () => {
   const r = runCli(['--version']);
   assert.equal(r.status, 0);
   assert.match(r.stdout, /create-boilerplate-web \d+\.\d+\.\d+/);
+});
+
+test('cli --overwrite + non-empty target + piped stdin refuses (A06, behavioral)', () => {
+  // Without a TTY, the destructive confirmation refuses outright (A06).
+  const target = fs.mkdtempSync(path.join('.tmp-tests', 'cbw-tty-'));
+  fs.writeFileSync(path.join(target, 'precious.txt'), 'data');
+  try {
+    // The test runner does not provide a TTY; stdin is a pipe.
+    const r = runCli([target, '--type=saas', '--overwrite', '--yes'], { stdin: 'delete\n' });
+    assert.notEqual(r.status, 0, 'cli must refuse when stdin is not a TTY');
+    assert.match(r.stderr, /stdin is not a TTY/);
+  } finally {
+    fs.rmSync(target, { recursive: true, force: true });
+  }
 });
 
 test('cli --overwrite + non-empty target + --yes still requires typed "delete" (M1, behavioral)', () => {

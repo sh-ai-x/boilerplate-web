@@ -107,6 +107,14 @@ async function confirmIfNonEmpty(targetFolder, overwrite, yes) {
   // of --yes.
   if (overwrite) {
     const target = targetFolder;
+    // TTY guard: a piped stdin defeats the human-in-the-loop intent.
+    // Require an actual TTY for destructive confirmation; --force still
+    // bypasses everything. (A06 fix.)
+    if (!process.stdin.isTTY) {
+      throw new Error(
+        `Destructive overwrite refused: stdin is not a TTY. Re-run interactively, or pass --force to bypass confirmation.`
+      );
+    }
     process.stderr.write(
       `DESTRUCTIVE: target "${target}" already has ${entries.length} entries and --overwrite is set.\n` +
         `Existing files will be overwritten. Type "delete" to continue: `
