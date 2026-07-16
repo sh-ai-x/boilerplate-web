@@ -68,3 +68,9 @@ TOCTOU re-validation, immutable SHA pinning via `templates.lock.json`,
 `--ignore-scripts` by default, execFileSync (no shell), and typed
 "delete" confirmation for destructive operations. All 26 tests are
 behavioral (no source-text regex).
+
+## Status
+
+- Review: **Verdict: Approve** (no criticals, no majors, no minors)
+- Security: pass (2 fixed in iter 9: A09 redact, A06 TTY guard)
+- Tests: 30/30 pass (`node --test tests/cli.test.js`)
