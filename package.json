@@ -9,7 +9,8 @@
   "main": "cli/index.js",
   "files": [
     "cli",
-    "README.md"
+    "README.md",
+    "templates.lock.json"
   ],
   "scripts": {
     "test": "node --test tests/"

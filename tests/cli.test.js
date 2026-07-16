@@ -145,6 +145,24 @@ test('revalidateBeforeWrite detects a symlink insertion (TOCTOU guard, behaviora
   }
 });
 
+test('revalidateBeforeWrite with allowUnsafe=true accepts out-of-CWD realpath (M1, behavioral)', () => {
+  // With --force (allowUnsafe=true), the realpath is returned instead of throwing.
+  const target = path.join('.tmp-tests', `cbw-rv-unsafe-${Date.now()}`);
+  try {
+    fs.symlinkSync('/etc', target);
+    const real = revalidateBeforeWrite(target, { allowUnsafe: true });
+    assert.equal(real, fs.realpathSync.native(target));
+  } finally {
+    try { fs.unlinkSync(target); } catch (_) {}
+  }
+});
+
+test('revalidateBeforeWrite passes a non-existent inside-CWD target through', () => {
+  const target = path.join('.tmp-tests', `cbw-rv-missing-${Date.now()}`);
+  const out = revalidateBeforeWrite(target);
+  assert.equal(out, target);
+});
+
 // === parseArgs ===
 test('parseArgs rejects --prefixed value as the positional target', () => {
   assert.throws(

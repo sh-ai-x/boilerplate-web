@@ -60,7 +60,7 @@ async function main() {
   // TOCTOU guard: re-realpath the target immediately before degit.clone.
   // Rejects any symlink insertion that happened between assertSafeTarget
   // and the actual write.
-  revalidateBeforeWrite(safeTarget);
+  revalidateBeforeWrite(safeTarget, { allowUnsafe: force });
 
   // Pipeline: each step runs in order; failure of any triggers cleanup()
   // and re-throws. Adding a step = appending to the array.
