@@ -102,8 +102,16 @@
       "step": 6,
       "name": "deploy-guide",
       "title": "Root README + per-template deployment READMEs (Supabase, Cloudflare, Google OAuth, Toss)",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "summary": "Deploy guides: root README (4756 bytes, 7 sections), per-template READMEs (saas, shop, portfolio) with Supabase setup, local dev, Vercel/Cloudflare Pages deploy. All 7 ACs PASS",
+      "started_at": "2026-07-17T00:34:30Z",
+      "completed_at": "2026-07-17T00:35:30Z",
+      "branch": "plan/boilerplate-cli-step6",
+      "commits": [
+        "4481333",
+        "a337005"
+      ]
     }
   ]
 }
