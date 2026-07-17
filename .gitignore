@@ -14,3 +14,5 @@ tools/
 logs/
 # <<< dev-kit <<<
 __pycache__/
+
+.tmp-tests
