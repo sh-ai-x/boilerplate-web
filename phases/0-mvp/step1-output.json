@@ -1,0 +1,18 @@
+{
+  "step": 1,
+  "name": "shared-infra",
+  "title": "Shared infra: env templates, Supabase client wrapper, Google-OAuth-only auth UI, Turnstile component",
+  "exit_code": 0,
+  "stdout": "AC1 grep no email/password input: PASS\nAC2 grep only signInWithOAuth: PASS\nAC3 pnpm --filter @boilerplate-web/shared build: exit 0 (tsc --noEmit clean)\nAC4 pnpm --filter @boilerplate-web/shared test: 5/5 pass (auth 3, turnstile 2)\nAC5 portfolio/ Turnstile forward-check: PASS\nAC6 .env.example 4 keys: PASS",
+  "stderr": "",
+  "duration_seconds": 9.0,
+  "timestamp": "2026-07-17T00:23:00Z",
+  "verification": {
+    "AC1_no_email_password_input": "PASS",
+    "AC2_only_google_oauth": "PASS",
+    "AC3_pnpm_build": "PASS",
+    "AC4_pnpm_test_count": "5/5",
+    "AC5_portfolio_no_turnstile": "PASS",
+    "AC6_env_example_4_keys": "PASS"
+  }
+}

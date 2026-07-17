@@ -1,0 +1,5 @@
+packages:
+  - 'templates/_shared'
+  - 'templates/saas'
+  - 'templates/shop'
+  - 'templates/portfolio'
