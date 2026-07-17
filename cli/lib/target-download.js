@@ -60,7 +60,7 @@ function buildSrc(type) {
   return `${lock.source}#${lock.ref}/${lock.templates[type]}`;
 }
 
-function downloadTemplate(type, targetFolder, opts = {}, degitImpl) {
+function downloadTemplate(type, targetFolder, opts = {}) {
   if (!validateType(type)) {
     const err = new Error(
       `Invalid --type "${type}". Allowed: ${VALID_TYPES.join(', ')}`
@@ -69,7 +69,10 @@ function downloadTemplate(type, targetFolder, opts = {}, degitImpl) {
     return Promise.reject(err);
   }
 
-  let degit = degitImpl;
+  // degitImpl is an optional dependency-injection seam (tests pass a fake;
+  // production loads the real module). It lives on opts so the public surface
+  // doesn't leak a positional parameter that exists only for tests.
+  let degit = opts.degitImpl;
   if (!degit) {
     try {
       degit = require('degit');
@@ -82,7 +85,8 @@ function downloadTemplate(type, targetFolder, opts = {}, degitImpl) {
     }
   }
 
-  const force = opts.force === true;
+  const { degitImpl: _drop, ...cloneOpts } = opts;
+  const force = cloneOpts.force === true;
   const emitter = degit(buildSrc(type), { cache: false, force, verbose: false });
   return emitter.clone(path.resolve(targetFolder));
 }

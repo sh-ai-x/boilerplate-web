@@ -7,7 +7,7 @@ const readline = require('readline');
 const { parseArgs, USAGE } = require('./lib/parse-args');
 const { validateType, downloadTemplate } = require('./lib/target-download');
 const { rewritePackageName } = require('./lib/rewrite');
-const { printPostInstallChecklist } = require('./lib/post-install');
+const { formatPostInstallChecklist } = require('./lib/post-install');
 const { assertSafeTarget, revalidateBeforeWrite } = require('./lib/path-safety');
 const { installDeps } = require('./lib/install-deps');
 const { runPipeline } = require('./lib/pipeline');
@@ -79,7 +79,8 @@ async function main() {
       installDeps(safeTarget, { allowScripts });
     },
     async () => {
-      printPostInstallChecklist();
+      const checklist = formatPostInstallChecklist(type);
+      if (checklist) process.stdout.write(checklist);
     },
   ]);
 }

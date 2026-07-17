@@ -4,8 +4,7 @@ const { execFileSync } = require('child_process');
 const path = require('path');
 const { redactStderr } = require('./redact');
 
-// Re-export for back-compat. New code should `require('./redact')` directly.
-module.exports = { installDeps, redactStderr };
+module.exports = { installDeps };
 
 function installDeps(targetFolder, { allowScripts }) {
   const args = ['install', '--no-audit', '--no-fund'];

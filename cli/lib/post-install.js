@@ -21,18 +21,18 @@ const CHECKLISTS = {
 };
 
 /**
- * Print a type-aware post-install checklist. The default SaaS checklist
- * (Supabase link/db push/functions deploy) is no longer unconditionally
- * applied to shop and portfolio — they each get their own list.
+ * Build a type-aware post-install checklist as a single printable string.
+ * Returns null when there is no checklist for the requested type (so the
+ * caller can skip the print entirely). Terminal I/O is the caller's job —
+ * this module is library-pure and returns data.
  */
-function printPostInstallChecklist(type) {
+function formatPostInstallChecklist(type) {
   const steps = CHECKLISTS[type];
-  if (!steps || steps.length === 0) return;
-  process.stdout.write('\nPost-install checklist:\n');
-  steps.forEach((step, i) => {
-    process.stdout.write(`  ${i + 1}. ${step}\n`);
-  });
-  process.stdout.write('\n');
+  if (!steps || steps.length === 0) return null;
+  const lines = ['\nPost-install checklist:'];
+  steps.forEach((step, i) => lines.push(`  ${i + 1}. ${step}`));
+  lines.push('');
+  return lines.join('\n');
 }
 
-module.exports = { CHECKLISTS, printPostInstallChecklist };
+module.exports = { CHECKLISTS, formatPostInstallChecklist };

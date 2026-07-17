@@ -70,35 +70,49 @@ test('buildSrc reads source + ref + subdir from templates.lock.json (SSOT, behav
 test('downloadTemplate rejects invalid type before any degit call (AC3, behavioral)', async () => {
   let called = false;
   const fakeDegit = () => ({ clone: () => { called = true; return Promise.resolve(); } });
-  await assert.rejects(() => downloadTemplate('invalid', '/tmp/cbw-x', {}, fakeDegit), /Invalid --type/);
+  await assert.rejects(() => downloadTemplate('invalid', '/tmp/cbw-x', { degitImpl: fakeDegit }), /Invalid --type/);
   assert.equal(called, false);
 });
 
 test('downloadTemplate defaults to force:false (A06-3, behavioral)', async () => {
   let capturedOpts = null;
-  await downloadTemplate('saas', '/tmp/cbw-y', {}, (src, opts) => {
+  await downloadTemplate('saas', '/tmp/cbw-y', { degitImpl: (src, opts) => {
     capturedOpts = opts;
     return { clone: () => Promise.resolve() };
-  });
+  } });
   assert.equal(capturedOpts.force, false);
 });
 
 test('downloadTemplate respects opts.force === true (A06-3, behavioral)', async () => {
   let capturedOpts = null;
-  await downloadTemplate('saas', '/tmp/cbw-z', { force: true }, (src, opts) => {
+  await downloadTemplate('saas', '/tmp/cbw-z', { force: true, degitImpl: (src, opts) => {
     capturedOpts = opts;
     return { clone: () => Promise.resolve() };
-  });
+  } });
   assert.equal(capturedOpts.force, true);
 });
 
 test('downloadTemplate returns a typed Error for missing degit (behavioral)', async () => {
-  // The injected impl returns null; downloadTemplate should fall through to the
-  // MISSING_DEGIT branch.
-  await assert.rejects(
-    () => downloadTemplate('saas', '/tmp/cbw-m', {}, null),
-    /Missing dependency/,
-  );
+  // Hide the degit module so require('degit') throws MODULE_NOT_FOUND.
+  // downloadTemplate should fall through to the MISSING_DEGIT branch.
+  const Module = require('module');
+  const origResolve = Module._resolveFilename;
+  Module._resolveFilename = function (request, ...rest) {
+    if (request === 'degit') {
+      const e = new Error(`Cannot find module '${request}'`);
+      e.code = 'MODULE_NOT_FOUND';
+      throw e;
+    }
+    return origResolve.call(this, request, ...rest);
+  };
+  try {
+    await assert.rejects(
+      () => downloadTemplate('saas', '/tmp/cbw-m', {}),
+      /Missing dependency/,
+    );
+  } finally {
+    Module._resolveFilename = origResolve;
+  }
 });
 
 // === assertSafeTarget — behavioral ===
@@ -266,7 +280,7 @@ test('cleanup with --force deletes a non-empty non-pre-existing target (opt-in)'
 
 // === installDeps ===
 test('redactStderr strips npm tokens, GitHub PATs, basic auth, userinfo URLs (A09, behavioral)', () => {
-  const { redactStderr } = require('../cli/lib/install-deps');
+  const { redactStderr } = require('../cli/lib/redact');
   const sample = [
     'npm ERR! code E401',
     'npm ERR! Unable to authenticate, your authentication token seems to be invalid.',
@@ -296,6 +310,25 @@ test('redactStderr redacts BARE npm token + ghp_ PAT (regression — review C1)'
   assert.doesNotMatch(out, /ghp_[0-9A-Za-z]{36}/, 'bare github PAT must be redacted');
   assert.match(out, /REDACTED:npm-token/);
   assert.match(out, /REDACTED:github-pat/);
+});
+
+test('redactStderr redacts every GitHub PAT prefix family + legacy base64 npm token', () => {
+  // Review follow-up: ghs_/gho_/ghr_/ghu_/github_pat_ were missed; npm
+  // legacy base64 (with `+`, `/`, `=`) was missed. All five GitHub prefixes
+  // and the base64 npm form must redact.
+  const { redactStderr } = require('../cli/lib/redact');
+  const samples = [
+    'github_pat_11ABCDEFG_1234567890abcdefghijklmnopqrstuvwxyz',
+    'ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn',
+    'gho_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn',
+    'ghr_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn',
+    'ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn',
+    'npm_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789+/abc==',
+  ];
+  for (const t of samples) {
+    const out = redactStderr('LEAKED: ' + t);
+    assert.doesNotMatch(out, new RegExp(t.slice(0, 8)), `${t.slice(0, 8)}… must be redacted`);
+  }
 });
 
 test('installDeps uses execFileSync (no shell injection) — behavioral via missing dir', () => {

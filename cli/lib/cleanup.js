@@ -6,6 +6,10 @@ const { isInsideCwd } = require('./path-safety');
 /**
  * Clean up the scaffolded target on failure.
  *
+ * Library-pure: this function does NOT write to stdout/stderr. It performs
+ * the file-system side effects and returns a `{ warnings: string[] }` summary
+ * for the caller (cli/index.js) to surface to the user.
+ *
  * SAFETY RULES (in order):
  * 1. If the target pre-existed, NEVER delete anything (we don't know which
  *    files we created vs which were already there).
@@ -18,21 +22,20 @@ const { isInsideCwd } = require('./path-safety');
  */
 function cleanup(targetFolder, opts) {
   const { unsafeAllowed, targetPreExisted } = opts;
+  const warnings = [];
 
   if (targetPreExisted) {
-    // The target was there before we ran. We don't know which files we
-    // created vs which were already there, so we don't delete anything.
-    process.stderr.write(
-      `Warning: target "${targetFolder}" pre-existed; leaving any partial scaffold in place.\n`
+    warnings.push(
+      `target "${targetFolder}" pre-existed; leaving any partial scaffold in place.`
     );
-    return;
+    return { warnings };
   }
 
   if (!unsafeAllowed && !isInsideCwd(targetFolder)) {
-    process.stderr.write(
-      `Warning: refusing to clean up "${targetFolder}" because it is outside the current working directory.\n`
+    warnings.push(
+      `refusing to clean up "${targetFolder}" because it is outside the current working directory.`
     );
-    return;
+    return { warnings };
   }
 
   // Race guard: re-stat the target inside cleanup. The up-front targetPreExisted
@@ -43,21 +46,21 @@ function cleanup(targetFolder, opts) {
   try {
     entries = fs.readdirSync(targetFolder);
   } catch (e) {
-    if (e.code === 'ENOENT') return; // Nothing to clean.
+    if (e.code === 'ENOENT') return { warnings }; // Nothing to clean.
     throw e;
   }
 
   if (entries.length === 0) {
     try { fs.rmdirSync(targetFolder); } catch (_) { /* best effort */ }
-    return;
+    return { warnings };
   }
 
   if (!unsafeAllowed) {
-    process.stderr.write(
-      `Warning: leaving partial scaffold "${targetFolder}" ` +
-      `(${entries.length} entries that may not be ours; pass --force to delete, or rm -rf manually).\n`
+    warnings.push(
+      `leaving partial scaffold "${targetFolder}" ` +
+      `(${entries.length} entries that may not be ours; pass --force to delete, or rm -rf manually).`
     );
-    return;
+    return { warnings };
   }
 
   // --force: rmSync the target. The user has opted in to deleting whatever
@@ -67,6 +70,7 @@ function cleanup(targetFolder, opts) {
   } catch (_) {
     // best effort
   }
+  return { warnings };
 }
 
 module.exports = { cleanup };
