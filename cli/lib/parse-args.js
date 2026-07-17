@@ -13,12 +13,27 @@ function parseArgs(argv) {
 
   for (const arg of args.slice(1)) {
     if (arg.startsWith('--type=')) {
+      if (type !== null) {
+        throw new Error(`--type specified more than once (got "${type}" then "${arg.slice('--type='.length)}")`);
+      }
       type = arg.slice('--type='.length);
     }
-    if (arg === '--overwrite') overwrite = true;
-    if (arg === '--allow-scripts') allowScripts = true;
-    if (arg === '--yes' || arg === '-y') yes = true;
-    if (arg === '--force') force = true;
+    if (arg === '--overwrite') {
+      if (overwrite) throw new Error(`--overwrite specified more than once`);
+      overwrite = true;
+    }
+    if (arg === '--allow-scripts') {
+      if (allowScripts) throw new Error(`--allow-scripts specified more than once`);
+      allowScripts = true;
+    }
+    if (arg === '--yes' || arg === '-y') {
+      if (yes) throw new Error(`--yes specified more than once`);
+      yes = true;
+    }
+    if (arg === '--force') {
+      if (force) throw new Error(`--force specified more than once`);
+      force = true;
+    }
   }
 
   // Reject --prefixed tokens as the positional target. We throw an

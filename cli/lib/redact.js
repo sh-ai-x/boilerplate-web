@@ -19,11 +19,12 @@
  * previous implementation returned "(groups[0] || '') + label" for ALL patterns,
  * which leaked the secret whenever groups[0] WAS the secret.
  *
- * GitHub PAT coverage: ghp_ (classic), github_pat_ (fine-grained), ghs_/gho_/
- * ghr_/ghu_ (GitHub Apps + OAuth). One combined pattern keeps the rule compact.
- *
- * npm token coverage: modern base62 and legacy base64 (which can include
- * `+`, `/`, `=` padding chars).
+ * Scope: this CLI talks to npm + GitHub only. We redact the credentials that
+ * actually appear in npm stderr — npm auth tokens, GitHub PATs (all 5 families),
+ * Authorization header values, userinfo URLs, and .npmrc auth lines. We do NOT
+ * redact cloud-provider tokens (AWS / Stripe / GCP / JWT / PEM) because the
+ * CLI never handles them; speculative coverage trips push-protection scanners
+ * and bloats the surface.
  */
 const SECRET_PATTERNS = [
   // npm auth tokens (base62 OR legacy base64 with = padding)

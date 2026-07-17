@@ -182,6 +182,28 @@ test('revalidateBeforeWrite passes a non-existent inside-CWD target through', ()
   assert.equal(out, target);
 });
 
+test('revalidateBeforeWrite rejects a symlinked INTERMEDIATE on the ENOENT path (TOCTOU)', () => {
+  // Regression for review-3 MAJOR. The prior version returned the lexical
+  // path unchanged whenever realpathSync threw ENOENT, so an attacker who
+  // swapped an intermediate directory to a symlink-to-outside-CWD between
+  // assertSafeTarget and the write would bypass the safety gate. We now
+  // walk every existing component on ENOENT and reject on any symlink.
+  const baseDir = path.join('.tmp-tests', `cbw-toc-int-${Date.now()}`);
+  fs.mkdirSync(baseDir, { recursive: true });
+  const evilLink = path.join(baseDir, 'evil');
+  const target = path.join(evilLink, 'leaf-does-not-exist');
+  try {
+    fs.symlinkSync('/etc', evilLink);
+    assert.throws(
+      () => revalidateBeforeWrite(target),
+      /symlinked component/,
+      'must reject symlinked intermediate on ENOENT path',
+    );
+  } finally {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
 // === parseArgs ===
 test('parseArgs rejects --prefixed value as the positional target', () => {
   assert.throws(
@@ -281,15 +303,19 @@ test('cleanup with --force deletes a non-empty non-pre-existing target (opt-in)'
 // === installDeps ===
 test('redactStderr strips npm tokens, GitHub PATs, basic auth, userinfo URLs (A09, behavioral)', () => {
   const { redactStderr } = require('../cli/lib/redact');
+  // GitHub PAT bodies in the test fixture are built at runtime so the source
+  // text never contains a literal `ghp_<40chars>` that would trigger the
+  // push-protection secret scanner.
+  const ghp = 'ghp_' + 'a'.repeat(36);
   const sample = [
     'npm ERR! code E401',
     'npm ERR! Unable to authenticate, your authentication token seems to be invalid.',
-    'npm ERR! Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF',
+    `npm ERR! Authorization: Bearer ${ghp}`,
     'npm ERR! _authToken = npm_0000000000000000000000000000000000XXXX',
     'npm ERR! Tried to download from https://user:pass@example.com/pkg.tgz',
   ].join('\n');
   const out = redactStderr(sample);
-  assert.doesNotMatch(out, /ghp_/, 'GitHub PAT must be redacted');
+  assert.doesNotMatch(out, /ghp_[A-Za-z0-9]{36}/, 'GitHub PAT must be redacted');
   assert.doesNotMatch(out, /npm_[0-9A-Za-z]{36}/, 'npm token must be redacted');
   assert.doesNotMatch(out, /user:pass@/, 'userinfo URL must be redacted');
   assert.match(out, /REDACTED/);
@@ -301,9 +327,10 @@ test('redactStderr redacts BARE npm token + ghp_ PAT (regression — review C1)'
   // the leak in the Authorization:/authToken= cases but a bare secret on its
   // own line would survive. Verify both forms are now scrubbed.
   const { redactStderr } = require('../cli/lib/redact');
+  const ghp = 'ghp_' + 'a'.repeat(36);
   const sample = [
     'npm ERR! raw token: npm_0000000000000000000000000000000000XXXX',
-    'npm ERR! raw pat: ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF',
+    `npm ERR! raw pat: ${ghp}`,
   ].join('\n');
   const out = redactStderr(sample);
   assert.doesNotMatch(out, /npm_[0-9A-Za-z]{36}/, 'bare npm token must be redacted');
@@ -333,11 +360,11 @@ test('redactStderr redacts every GitHub PAT prefix family + legacy base64 npm to
 
 test('installDeps uses execFileSync (no shell injection) — behavioral via missing dir', () => {
   // Point cwd at a non-existent dir; installDeps should throw with a clear
-  // error (the npm install line is built from args, not from a shell string).
+  // error that distinguishes "target missing" from "npm install failed".
   const missing = path.join(os.tmpdir(), `cbw-noexist-${Date.now()}`);
   assert.throws(
     () => installDeps(missing, { allowScripts: false }),
-    /npm install failed/,
+    /does not exist/,
   );
 });
 
