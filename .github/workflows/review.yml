@@ -307,7 +307,7 @@ jobs:
           fi
           file_verdict=""
           if [ -f "$AGENT_OUTPUT" ]; then
-            file_verdict="$(python3 "${{ github.workspace }}/.github/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || echo '')"
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || echo '')"
           fi
 
           if [ -n "$file_verdict" ]; then
@@ -315,35 +315,30 @@ jobs:
             verdict_source="agent-output-file"
             agent_ran="true"
           else
-            # Fallback: comment-grep. Tolerated for backwards compat only.
-            # Wrap each stage in `|| echo ''` to neutralize pipefail; the
-            # `||` operator has lower precedence than `|`, so we have to
-            # use explicit `|| true` per-stage. The previous version's
-            # single trailing `|| true` was a bug that surfaced as exit 1
-            # when any middle stage failed.
-            verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
-              2>/dev/null \
-              | grep -E 'Verdict: (Approve|Blocked|Changes Requested)' \
-              | tail -1 \
-              | grep -oE 'Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)' \
-              | sed -E 's/.*Verdict:[[:space:]]*//' \
-              || echo '')"
-            verdict_source="comment-grep-fallback"
-            # agent_ran: the action ran if any claude-prefixed comment
-            # exists on the PR (the comment-grep got something) OR if
-            # the output file exists. Otherwise the agent didn't run.
+            # ROOT-CAUSE FIX: when the agent's output file is missing or
+            # extract-verdict.py returns nothing, default to Approve + warning
+            # instead of grepping PR comments for a stale verdict. The
+            # previous comment-grep fallback could resurrect a "Verdict:
+            # Changes Requested" from an earlier run and re-introduce gate
+            # flapping — the severity gate's "default to Approve on empty"
+            # branch never fired because the fallback ensured verdict was
+            # non-empty. Matches the gate's existing contract: empty
+            # verdict is valid; the human gate (REVIEW_REQUIRED /
+            # CHANGES_REQUESTED on the PR) is what actually blocks merge.
             if [ -f "$AGENT_OUTPUT" ]; then
+              echo "::warning::review verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-empty-file"
               agent_ran="true"
             else
-              claude_count="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                --jq '[.[] | select((.user.login // "") | startswith("claude"))] | length' \
-                2>/dev/null || echo 0)"
-              if [ "${claude_count:-0}" -gt 0 ]; then
-                agent_ran="true"
-              else
-                agent_ran="false"
-              fi
+              # No agent output file. The bootstrap-PR remediation
+              # (needs_fallback=true) is handled by the early-return branch
+              # above; if we got here without a fallback, the action
+              # silently skipped. Default to Approve + warning.
+              echo "::warning::review verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-no-file"
+              agent_ran="false"
             fi
           fi
           # ALWAYS set the outputs (don't exit early). Empty verdict is
@@ -593,19 +588,26 @@ jobs:
           fi
           file_verdict=""
           if [ -f "$AGENT_OUTPUT" ]; then
-            file_verdict="$(python3 "${{ github.workspace }}/.github/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || true)"
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || true)"
           fi
           if [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
             verdict_source="agent-output-file"
           else
-            # Fallback: comment-grep. Tolerated for backwards compat only.
-            verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
-              | grep -E 'Verdict: (Approve|Blocked|Changes Requested)' | tail -1 \
-              | grep -oE 'Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)' \
-              | sed -E 's/.*Verdict:[[:space:]]*//' || true)"
-            verdict_source="comment-grep-fallback"
+            # Same root-cause fix as the review job above: default to
+            # Approve + warning on empty verdict, never grep PR comments
+            # (the comment-grep fallback resurrected stale verdicts and
+            # re-introduced gate flapping on the boilerplate-web PR #18
+            # repro).
+            if [ -f "$AGENT_OUTPUT" ]; then
+              echo "::warning::security verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-empty-file"
+            else
+              echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-no-file"
+            fi
           fi
           # agent_ran: the action ran if the output file exists OR if any
           # claude-prefixed comment exists on the PR (the latter covers the
