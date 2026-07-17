@@ -55,7 +55,7 @@ async function main() {
     if (e.code !== 'ENOENT') throw e;
   }
 
-  await confirmIfNonEmpty(safeTarget, overwrite, yes);
+  await confirmIfNonEmpty(safeTarget, overwrite, yes, force);
 
   // TOCTOU guard: re-realpath the target immediately before degit.clone.
   // Rejects any symlink insertion that happened between assertSafeTarget
@@ -90,9 +90,9 @@ async function main() {
  * SAFETY (M1): --yes alone skips the prompt. But --yes + --overwrite
  * combined is a destructive intent (existing dir + will overwrite) — we
  * require a typed "delete" confirmation in that combination. The user
- * can still use --force to bypass the prompt entirely.
+ * can pass --force to bypass all confirmation, including the TTY gate.
  */
-async function confirmIfNonEmpty(targetFolder, overwrite, yes) {
+async function confirmIfNonEmpty(targetFolder, overwrite, yes, force) {
   let entries = [];
   try {
     entries = fs.readdirSync(targetFolder);
@@ -102,14 +102,16 @@ async function confirmIfNonEmpty(targetFolder, overwrite, yes) {
   }
   if (entries.length === 0) return;
 
+  // --force bypasses every confirmation below: TTY guard, typed "delete", y/N.
+  if (force) return;
+
   // Destructive intent guard: --overwrite with an existing target = the
   // user's files WILL be replaced. Require typed confirmation regardless
   // of --yes.
   if (overwrite) {
     const target = targetFolder;
     // TTY guard: a piped stdin defeats the human-in-the-loop intent.
-    // Require an actual TTY for destructive confirmation; --force still
-    // bypasses everything. (A06 fix.)
+    // Require an actual TTY for destructive confirmation. (A06 fix.)
     if (!process.stdin.isTTY) {
       throw new Error(
         `Destructive overwrite refused: stdin is not a TTY. Re-run interactively, or pass --force to bypass confirmation.`

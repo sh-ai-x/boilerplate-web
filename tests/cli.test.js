@@ -9,7 +9,7 @@ const { spawnSync } = require('node:child_process');
 
 const { validateType, buildSrc, downloadTemplate, VALID_TYPES, loadLock } =
   require('../cli/lib/target-download');
-const { POST_INSTALL_STEPS } = require('../cli/lib/post-install');
+const { CHECKLISTS } = require('../cli/lib/post-install');
 const { assertSafeTarget, isInsideCwd, revalidateBeforeWrite } = require('../cli/lib/path-safety');
 const { installDeps } = require('../cli/lib/install-deps');
 const { runPipeline } = require('../cli/lib/pipeline');
@@ -37,11 +37,16 @@ test('validateType rejects unknown values before any network call (AC3)', () => 
 });
 
 // === post-install checklist (AC5) ===
-test('post-install checklist mentions supabase link, db push, functions deploy', () => {
-  const all = POST_INSTALL_STEPS.join('\n');
-  assert.match(all, /supabase link/);
-  assert.match(all, /supabase db push/);
-  assert.match(all, /supabase functions deploy/);
+test('post-install checklist is type-aware: saas/shop/portfolio each have their own steps', () => {
+  const all = Object.values(CHECKLISTS).flat().join('\n');
+  assert.match(all, /supabase link/, 'all templates use supabase link');
+  assert.match(all, /supabase db push/, 'all templates use supabase db push');
+  assert.match(all, /supabase functions deploy/, 'saas + shop use supabase functions deploy');
+  assert.ok(CHECKLISTS.saas.length > 0, 'saas has checklist steps');
+  assert.ok(CHECKLISTS.shop.length > 0, 'shop has checklist steps');
+  assert.ok(CHECKLISTS.portfolio.length > 0, 'portfolio has checklist steps');
+  // shop-specific: toss reference
+  assert.match(CHECKLISTS.shop.join('\n'), /toss/i, 'shop checklist mentions Toss keys');
 });
 
 // === buildSrc — ref + source + subdir from lockfile ===
@@ -228,12 +233,35 @@ test('cleanup respects targetPreExisted and never deletes user files (behavioral
   }
 });
 
-test('cleanup deletes a non-pre-existing target (best effort)', () => {
+test('cleanup deletes an empty non-pre-existing target (best effort)', () => {
   const target = path.join('.tmp-tests', `cbw-clean-${Date.now()}`);
   fs.mkdirSync(target, { recursive: true });
-  fs.writeFileSync(path.join(target, 'a.txt'), 'a');
+  // Empty dir — safe to remove; nothing to mis-attribute.
   cleanup(target, { unsafeAllowed: false, targetPreExisted: false });
-  assert.equal(fs.existsSync(target), false, 'non-pre-existing target should be removed');
+  assert.equal(fs.existsSync(target), false, 'empty non-pre-existing target should be removed');
+});
+
+test('cleanup refuses to auto-delete a non-empty non-pre-existing target (race-safe)', () => {
+  // Race guard: between the up-front targetPreExisted=false snapshot and the
+  // failure, user files may have been added. Without --force we must NOT
+  // rmSync the directory — those files might not be ours.
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'cbw-clean-'));
+  const userFile = path.join(target, 'precious.txt');
+  fs.writeFileSync(userFile, 'do-not-delete');
+  try {
+    cleanup(target, { unsafeAllowed: false, targetPreExisted: false });
+    assert.equal(fs.existsSync(userFile), true, 'user file must NOT be deleted without --force');
+    assert.equal(fs.existsSync(target), true, 'non-empty target must NOT be removed without --force');
+  } finally {
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test('cleanup with --force deletes a non-empty non-pre-existing target (opt-in)', () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'cbw-clean-'));
+  fs.writeFileSync(path.join(target, 'a.txt'), 'a');
+  cleanup(target, { unsafeAllowed: true, targetPreExisted: false });
+  assert.equal(fs.existsSync(target), false, '--force should remove non-empty target');
 });
 
 // === installDeps ===
@@ -251,6 +279,23 @@ test('redactStderr strips npm tokens, GitHub PATs, basic auth, userinfo URLs (A0
   assert.doesNotMatch(out, /npm_[0-9A-Za-z]{36}/, 'npm token must be redacted');
   assert.doesNotMatch(out, /user:pass@/, 'userinfo URL must be redacted');
   assert.match(out, /REDACTED/);
+});
+
+test('redactStderr redacts BARE npm token + ghp_ PAT (regression — review C1)', () => {
+  // The previous version leaked tokens whenever the only capture group WAS
+  // the secret (patterns 1+2). The broader prefix patterns happened to mask
+  // the leak in the Authorization:/authToken= cases but a bare secret on its
+  // own line would survive. Verify both forms are now scrubbed.
+  const { redactStderr } = require('../cli/lib/redact');
+  const sample = [
+    'npm ERR! raw token: npm_0000000000000000000000000000000000XXXX',
+    'npm ERR! raw pat: ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF',
+  ].join('\n');
+  const out = redactStderr(sample);
+  assert.doesNotMatch(out, /npm_[0-9A-Za-z]{36}/, 'bare npm token must be redacted');
+  assert.doesNotMatch(out, /ghp_[0-9A-Za-z]{36}/, 'bare github PAT must be redacted');
+  assert.match(out, /REDACTED:npm-token/);
+  assert.match(out, /REDACTED:github-pat/);
 });
 
 test('installDeps uses execFileSync (no shell injection) — behavioral via missing dir', () => {
