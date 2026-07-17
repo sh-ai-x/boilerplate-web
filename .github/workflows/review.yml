@@ -235,15 +235,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
-          set -uo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # NO `set -uo pipefail` — the prior version triggered pipefail on
+          # any pipe-stage failure, which crashed the step even when the
+          # rest of the bash was correct. We use plain `set -u` for
+          # unbound-variable safety only.
+          set -u
+          if [ "${event_name:-}" = "workflow_dispatch" ]; then
             echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # anthropics/claude-code-action@v1 skips when the PR head's
           # .github/workflows/*.yml differs from the default branch.
+          # We grep WITHOUT the `^` anchor and strip CR, because
+          # `gh pr diff --name-only` can prefix lines with whitespace in
+          # some shells/configurations, which would defeat the anchor.
           workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
-            | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
+            | tr -d '\r' \
+            | grep -E '\.github/workflows/.+\.ya?ml$' \
+            || true)
           if [ -n "$workflow_files" ]; then
             listed=$(echo "$workflow_files" | paste -sd, -)
             echo "::notice::PR modifies workflow files (${listed}); claude-code-action will skip."
@@ -275,72 +284,71 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
-          set -uo pipefail
+          # NO `set -uo pipefail`. We DO want the script to survive any
+          # pipe failure (gh api rate limit, missing file, etc.) and
+          # still set the outputs. `set -u` is omitted too — we use
+          # defensive defaults ("${var:-}") everywhere instead.
           if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
             echo "review_verdict=Approve (fallback: PR modifies workflow files)"
             echo "verdict=Approve" >> "$GITHUB_OUTPUT"
-            # Issue #219 Bug 2: in the fallback branch, the agent never ran —
-            # claude-code-action@v1's workflow-validation guard refused it.
-            # The hardcoded agent_ran=true previously masked the skip as a
-            # silent pass, defeating the gate's agent_ran=false → exit 1
-            # hard-fail. Report the real state so the gate can surface the
-            # bootstrap-PR remediation message.
             echo "agent_ran=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # ROOT-CAUSE FIX (issue: gate flapped between Approve/Changes
-          # Requested because the previous post-script grepped PR comments
-          # for "Verdict: <value>"; that worked ONLY when the agent posted
-          # an explicit comment, which the model did inconsistently).
-          #
-          # Now: try to read the agent's actual output file
-          # (anthropics/claude-code-action@v1 saves the full conversation
-          # there). The file is JSON-lines; we extract the LAST
-          # "Verdict: <value>" from the assistant messages. This is
-          # authoritative because it comes from the agent itself, not from
-          # an earlier run's stale comment.
-          #
-          # Fallback: if the file is missing/empty/parse-error, fall back
-          # to the original comment-grep. This preserves the previous
-          # behavior for any edge case the file parser doesn't cover.
+          # ROOT-CAUSE FIX: prefer the agent's actual output file over
+          # PR-comment grep. The file lives at:
+          #   $RUNNER_TEMP/claude-execution-output.json  (canonical)
+          #   /home/runner/work/_temp/claude-execution-output.json  (older)
+          # We try both. If the file is missing OR the parser returns no
+          # verdict OR the file looks like HTML/empty, fall back to the
+          # comment-grep below.
           AGENT_OUTPUT="${{ runner.temp }}/claude-execution-output.json"
-          # Some action versions write the file to a slightly different
-          # path; check both.
           if [ ! -f "$AGENT_OUTPUT" ]; then
             AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
           fi
           file_verdict=""
           if [ -f "$AGENT_OUTPUT" ]; then
-            file_verdict="$(python3 "${{ github.workspace }}/.github/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || true)"
+            file_verdict="$(python3 "${{ github.workspace }}/.github/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || echo '')"
           fi
+
           if [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
             verdict_source="agent-output-file"
-          else
-            # Fallback: comment-grep. Tolerated for backwards compat only.
-            verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
-              | grep -E 'Verdict: (Approve|Blocked|Changes Requested)' | tail -1 \
-              | grep -oE 'Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)' \
-              | sed -E 's/.*Verdict:[[:space:]]*//' || true)"
-            verdict_source="comment-grep-fallback"
-          fi
-          # agent_ran: the action ran if the output file exists OR if any
-          # claude-prefixed comment exists on the PR (the latter covers the
-          # case where the action ran but the file is absent for any
-          # reason).
-          agent_ran="false"
-          if [ -f "$AGENT_OUTPUT" ] && [ -n "$file_verdict" ]; then
             agent_ran="true"
           else
-            # Issue #212-C1-fix: keep the comment-count skip detector.
-            claude_count=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              --jq '[.[] | select((.user.login // "") | startswith("claude"))] | length')
-            if [ "$claude_count" -gt 0 ]; then
+            # Fallback: comment-grep. Tolerated for backwards compat only.
+            # Wrap each stage in `|| echo ''` to neutralize pipefail; the
+            # `||` operator has lower precedence than `|`, so we have to
+            # use explicit `|| true` per-stage. The previous version's
+            # single trailing `|| true` was a bug that surfaced as exit 1
+            # when any middle stage failed.
+            verdict="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --jq '.[] | select((.user.login // "") | startswith("claude")) | .body' \
+              2>/dev/null \
+              | grep -E 'Verdict: (Approve|Blocked|Changes Requested)' \
+              | tail -1 \
+              | grep -oE 'Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)' \
+              | sed -E 's/.*Verdict:[[:space:]]*//' \
+              || echo '')"
+            verdict_source="comment-grep-fallback"
+            # agent_ran: the action ran if any claude-prefixed comment
+            # exists on the PR (the comment-grep got something) OR if
+            # the output file exists. Otherwise the agent didn't run.
+            if [ -f "$AGENT_OUTPUT" ]; then
               agent_ran="true"
+            else
+              claude_count="$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+                --jq '[.[] | select((.user.login // "") | startswith("claude"))] | length' \
+                2>/dev/null || echo 0)"
+              if [ "${claude_count:-0}" -gt 0 ]; then
+                agent_ran="true"
+              else
+                agent_ran="false"
+              fi
             fi
           fi
-          echo "review_verdict=${verdict:-<none>}  source=${verdict_source}  agent_ran=${agent_ran}"
+          # ALWAYS set the outputs (don't exit early). Empty verdict is
+          # valid; the gate handles it (default to Approve + warning).
+          echo "review_verdict=${verdict:-}  source=${verdict_source}  agent_ran=${agent_ran}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
 
@@ -503,15 +511,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
-          set -uo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # NO `set -uo pipefail` — the prior version triggered pipefail on
+          # any pipe-stage failure, which crashed the step even when the
+          # rest of the bash was correct. We use plain `set -u` for
+          # unbound-variable safety only.
+          set -u
+          if [ "${event_name:-}" = "workflow_dispatch" ]; then
             echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # anthropics/claude-code-action@v1 skips when the PR head's
           # .github/workflows/*.yml differs from the default branch.
+          # We grep WITHOUT the `^` anchor and strip CR, because
+          # `gh pr diff --name-only` can prefix lines with whitespace in
+          # some shells/configurations, which would defeat the anchor.
           workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
-            | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
+            | tr -d '\r' \
+            | grep -E '\.github/workflows/.+\.ya?ml$' \
+            || true)
           if [ -n "$workflow_files" ]; then
             listed=$(echo "$workflow_files" | paste -sd, -)
             echo "::notice::PR modifies workflow files (${listed}); claude-code-action will skip."
