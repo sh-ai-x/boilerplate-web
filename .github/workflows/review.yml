@@ -50,11 +50,12 @@ on:
   workflow_dispatch:
     inputs:
       review_provider:
-        description: "Provider for this run (default: minimax)"
+        description: "Provider for this run (overrides vars.CI_REVIEW_PROVIDER)"
         required: false
-        default: "minimax"
+        default: ""
         type: choice
         options:
+          - ""
           - minimax
           - anthropic
       pr_number:
@@ -142,13 +143,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "provider=${{ github.event.inputs.review_provider }}" >> "$GITHUB_OUTPUT"
+            provider="${{ github.event.inputs.review_provider }}"
             [ -z "${{ github.event.inputs.pr_number }}" ] && { echo "::error::pr_number required"; exit 1; }
             echo "pr_number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
           else
-            echo "provider=minimax" >> "$GITHUB_OUTPUT"
+            provider="${{ vars.CI_REVIEW_PROVIDER }}"
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
+          if [ -z "$provider" ]; then
+            echo "::error::No provider resolved. Set the GitHub repo variable:"
+            echo "  gh variable set CI_REVIEW_PROVIDER --body anthropic"
+            echo "or pass review_provider on a manual workflow_dispatch run."
+            exit 1
+          fi
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
 
       - name: Run /dev-kit:review via MiniMax
         if: steps.provider.outputs.provider == 'minimax'
@@ -235,24 +243,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
-          # NO `set -uo pipefail` — the prior version triggered pipefail on
-          # any pipe-stage failure, which crashed the step even when the
-          # rest of the bash was correct. We use plain `set -u` for
-          # unbound-variable safety only.
-          set -u
-          if [ "${event_name:-}" = "workflow_dispatch" ]; then
+          set -uo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # anthropics/claude-code-action@v1 skips when the PR head's
           # .github/workflows/*.yml differs from the default branch.
-          # We grep WITHOUT the `^` anchor and strip CR, because
-          # `gh pr diff --name-only` can prefix lines with whitespace in
-          # some shells/configurations, which would defeat the anchor.
           workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
-            | tr -d '\r' \
-            | grep -E '\.github/workflows/.+\.ya?ml$' \
-            || true)
+            | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
           if [ -n "$workflow_files" ]; then
             listed=$(echo "$workflow_files" | paste -sd, -)
             echo "::notice::PR modifies workflow files (${listed}); claude-code-action will skip."
@@ -284,23 +283,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
-          # NO `set -uo pipefail`. We DO want the script to survive any
-          # pipe failure (gh api rate limit, missing file, etc.) and
-          # still set the outputs. `set -u` is omitted too — we use
-          # defensive defaults ("${var:-}") everywhere instead.
+          set -uo pipefail
           if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
             echo "review_verdict=Approve (fallback: PR modifies workflow files)"
             echo "verdict=Approve" >> "$GITHUB_OUTPUT"
+            echo "verdict_source=needs-fallback-bootstrap-pr" >> "$GITHUB_OUTPUT"
+            # Issue #219 Bug 2: in the fallback branch, the agent never ran —
+            # claude-code-action@v1's workflow-validation guard refused it.
+            # The hardcoded agent_ran=true previously masked the skip as a
+            # silent pass, defeating the gate's agent_ran=false → exit 1
+            # hard-fail. Report the real state so the gate can surface the
+            # bootstrap-PR remediation message.
             echo "agent_ran=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # ROOT-CAUSE FIX: prefer the agent's actual output file over
-          # PR-comment grep. The file lives at:
-          #   $RUNNER_TEMP/claude-execution-output.json  (canonical)
-          #   /home/runner/work/_temp/claude-execution-output.json  (older)
-          # We try both. If the file is missing OR the parser returns no
-          # verdict OR the file looks like HTML/empty, fall back to the
-          # comment-grep below.
+          # Issue #244 root-cause fix: read the verdict from the agent's
+          # actual output file (claude-execution-output.json) instead of
+          # grepping PR comments. The comment-grep fallback was the source
+          # of deterministic gate flapping on boilerplate-web PR #18: the
+          # `grep | tail -1` picked up a stale "Verdict: Changes Requested"
+          # from the previous push, defeating the severity gate's own
+          # "default to Approve on empty verdict" tolerance.
           AGENT_OUTPUT="${{ runner.temp }}/claude-execution-output.json"
           if [ ! -f "$AGENT_OUTPUT" ]; then
             AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
@@ -309,72 +312,36 @@ jobs:
           if [ -f "$AGENT_OUTPUT" ]; then
             file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || echo '')"
           fi
-
           if [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
             verdict_source="agent-output-file"
             agent_ran="true"
           else
             # ROOT-CAUSE FIX: when the agent's output file is missing or
-            # extract-verdict.py returns nothing, default to Approve + warning
-            # instead of grepping PR comments for a stale verdict. The
-            # previous comment-grep fallback could resurrect a "Verdict:
-            # Changes Requested" from an earlier run and re-introduce gate
-            # flapping — the severity gate's "default to Approve on empty"
-            # branch never fired because the fallback ensured verdict was
-            # non-empty. Matches the gate's existing contract: empty
-            # verdict is valid; the human gate (REVIEW_REQUIRED /
-            # CHANGES_REQUESTED on the PR) is what actually blocks merge.
-            #
-            # agent_ran: only set false when the action explicitly refused
-            # to run (the bootstrap-PR remediation case at
-            # needs_fallback=true already short-circuits above; if we got
-            # here without a fallback, the action silently skipped). For
-            # job-timeout (cancelled) or genuine failure, the agent DID
-            # run — just didn't finish in time or hit a runtime error.
-            # Set agent_ran=true so the gate's hard-fail-on-skip rule
-            # doesn't fire on transient backend issues; the gate's
-            # failure-result hard-fail rule (line 718) will still catch
-            # actual job failures.
+            # extract-verdict.py returns nothing, default to Approve +
+            # warning instead of grepping PR comments. Matches the
+            # severity gate's existing contract: empty verdict is valid;
+            # the human gate (REVIEW_REQUIRED / CHANGES_REQUESTED on the
+            # PR) is what actually blocks merge.
             if [ -f "$AGENT_OUTPUT" ]; then
               echo "::warning::review verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
               verdict="Approve"
               verdict_source="default-approve-empty-file"
               agent_ran="true"
             else
-              # No agent output file. Distinguish:
-              #   - job.status == "cancelled" → agent ran but timed out
-              #   - job.status == "failure"   → agent ran but errored
-              #   - job.status == "success"   → bootstrap-PR / action refused
-              # The first two are transient; set agent_ran=true so the
-              # gate's hard-fail-on-skip rule doesn't fire. The third
-              # means the action never started (agent_ran=false is
-              # correct; gate's hard-fail fires as designed).
-              case "${{ job.status }}" in
-                cancelled|failure)
-                  echo "::warning::review verdict missing (job.status=${{ job.status }}; agent ran but didn't finish; output file not written); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-job-${{ job.status }}"
-                  agent_ran="true"
-                  ;;
-                *)
-                  # success (or unset — shouldn't happen since the
-                  # needs_fallback branch above already short-circuits
-                  # the bootstrap-PR case). Default to Approve + warning
-                  # with agent_ran=false so the gate's hard-fail-on-skip
-                  # rule fires if this somehow reaches it.
-                  echo "::warning::review verdict missing (no agent output file at ${AGENT_OUTPUT}; job.status=${{ job.status }}); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-no-file"
-                  agent_ran="false"
-                  ;;
-              esac
+              # No agent output file. The bootstrap-PR remediation
+              # (needs_fallback=true) is handled by the early-return
+              # branch above; if we got here without a fallback, the
+              # action silently skipped. Default to Approve + warning.
+              echo "::warning::review verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-no-file"
+              agent_ran="false"
             fi
           fi
-          # ALWAYS set the outputs (don't exit early). Empty verdict is
-          # valid; the gate handles it (default to Approve + warning).
-          echo "review_verdict=${verdict:-}  source=${verdict_source}  agent_ran=${agent_ran}"
-          echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          echo "review_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "verdict_source=${verdict_source}" >> "$GITHUB_OUTPUT"
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
 
   security:
@@ -445,13 +412,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "provider=${{ github.event.inputs.review_provider }}" >> "$GITHUB_OUTPUT"
+            provider="${{ github.event.inputs.review_provider }}"
             [ -z "${{ github.event.inputs.pr_number }}" ] && { echo "::error::pr_number required"; exit 1; }
             echo "pr_number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
           else
-            echo "provider=minimax" >> "$GITHUB_OUTPUT"
+            provider="${{ vars.CI_REVIEW_PROVIDER }}"
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
+          if [ -z "$provider" ]; then
+            echo "::error::No provider resolved. Set the GitHub repo variable:"
+            echo "  gh variable set CI_REVIEW_PROVIDER --body anthropic"
+            echo "or pass review_provider on a manual workflow_dispatch run."
+            exit 1
+          fi
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
 
       - name: Run /dev-kit:security via MiniMax
         if: steps.provider.outputs.provider == 'minimax'
@@ -536,24 +510,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
         run: |
-          # NO `set -uo pipefail` — the prior version triggered pipefail on
-          # any pipe-stage failure, which crashed the step even when the
-          # rest of the bash was correct. We use plain `set -u` for
-          # unbound-variable safety only.
-          set -u
-          if [ "${event_name:-}" = "workflow_dispatch" ]; then
+          set -uo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # anthropics/claude-code-action@v1 skips when the PR head's
           # .github/workflows/*.yml differs from the default branch.
-          # We grep WITHOUT the `^` anchor and strip CR, because
-          # `gh pr diff --name-only` can prefix lines with whitespace in
-          # some shells/configurations, which would defeat the anchor.
           workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
-            | tr -d '\r' \
-            | grep -E '\.github/workflows/.+\.ya?ml$' \
-            || true)
+            | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
           if [ -n "$workflow_files" ]; then
             listed=$(echo "$workflow_files" | paste -sd, -)
             echo "::notice::PR modifies workflow files (${listed}); claude-code-action will skip."
@@ -589,32 +554,16 @@ jobs:
           if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
             echo "security_verdict=Approve (fallback: PR modifies workflow files)"
             echo "verdict=Approve" >> "$GITHUB_OUTPUT"
+            echo "verdict_source=needs-fallback-bootstrap-pr" >> "$GITHUB_OUTPUT"
             # Issue #219 Bug 2: same defect as the review extract step —
             # report agent_ran=false so the severity gate can hard-fail
             # with the bootstrap-PR remediation message.
             echo "agent_ran=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # ROOT-CAUSE FIX (issue: gate flapped between Approve/Changes
-          # Requested because the previous post-script grepped PR comments
-          # for "Verdict: <value>"; that worked ONLY when the agent posted
-          # an explicit comment, which the model did inconsistently).
-          #
-          # Now: try to read the agent's actual output file
-          # (anthropics/claude-code-action@v1 saves the full conversation
-          # there). The file is JSON-lines; we extract the LAST
-          # "Verdict: <value>" from the assistant messages. This is
-          # authoritative because it comes from the agent itself, not from
-          # an earlier run's stale comment.
-          #
-          # Fallback: if the file is missing/empty/parse-error, default
-          # to Approve + warning. The previous comment-grep fallback
-          # resurrected stale verdicts and re-introduced gate flapping
-          # (boilerplate-web PR #18 repro, dev-harness-kit #244) — never
-          # grep PR comments for a verdict.
+          # Issue #244 root-cause fix: same as the review extract step —
+          # read from the agent's output file, never grep PR comments.
           AGENT_OUTPUT="${{ runner.temp }}/claude-execution-output.json"
-          # Some action versions write the file to a slightly different
-          # path; check both.
           if [ ! -f "$AGENT_OUTPUT" ]; then
             AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
           fi
@@ -625,44 +574,25 @@ jobs:
           if [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
             verdict_source="agent-output-file"
+            agent_ran="true"
           else
-            # Same root-cause fix as the review job above: default to
-            # Approve + warning on empty verdict, never grep PR comments
-            # (the comment-grep fallback resurrected stale verdicts and
-            # re-introduced gate flapping on the boilerplate-web PR #18
-            # repro). agent_ran mirrors the same job.status check so the
-            # gate's hard-fail-on-skip rule doesn't fire on transient
-            # cancelled/failure outcomes.
+            # Same root-cause fix as the review job: default to Approve +
+            # warning on empty verdict, never grep PR comments.
             if [ -f "$AGENT_OUTPUT" ]; then
               echo "::warning::security verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
               verdict="Approve"
               verdict_source="default-approve-empty-file"
               agent_ran="true"
             else
-              case "${{ job.status }}" in
-                cancelled|failure)
-                  echo "::warning::security verdict missing (job.status=${{ job.status }}; agent ran but didn't finish; output file not written); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-job-${{ job.status }}"
-                  agent_ran="true"
-                  ;;
-                *)
-                  echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}; job.status=${{ job.status }}); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-no-file"
-                  agent_ran="false"
-                  ;;
-              esac
+              echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-no-file"
+              agent_ran="false"
             fi
           fi
-          # agent_ran is now set in EVERY branch of the if/case above
-          # (file_verdict success → true, file present-but-empty → true,
-          # job.status=cancelled|failure → true, no-file success →
-          # false for bootstrap-PR remediation). The previous
-          # post-hoc comment-count detector was superseded by the
-          # case-statement logic; removing it avoids an overwrite.
-          echo "security_verdict=${verdict:-<none>}  source=${verdict_source}  agent_ran=${agent_ran}"
-          echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
+          echo "security_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "verdict_source=${verdict_source}" >> "$GITHUB_OUTPUT"
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
 
   gate:
