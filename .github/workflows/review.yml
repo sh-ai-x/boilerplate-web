@@ -140,15 +140,29 @@ jobs:
         id: provider
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Repo variable `CI_REVIEW_PROVIDER` (set via `gh variable set CI_REVIEW_PROVIDER <value>`)
+          # takes precedence over the workflow_dispatch input. Empty/missing falls through.
+          CI_REVIEW_PROVIDER: ${{ vars.CI_REVIEW_PROVIDER }}
         run: |
+          # Precedence: vars.CI_REVIEW_PROVIDER > github.event.inputs.review_provider > 'minimax'
+          provider="${CI_REVIEW_PROVIDER:-}"
+          if [ -z "$provider" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            provider="${{ github.event.inputs.review_provider }}"
+          fi
+          if [ -z "$provider" ]; then
+            provider="minimax"
+          fi
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "provider=${{ github.event.inputs.review_provider }}" >> "$GITHUB_OUTPUT"
             [ -z "${{ github.event.inputs.pr_number }}" ] && { echo "::error::pr_number required"; exit 1; }
             echo "pr_number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
           else
-            echo "provider=minimax" >> "$GITHUB_OUTPUT"
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
+          source_label="default"
+          [ -n "$CI_REVIEW_PROVIDER" ] && source_label="vars.CI_REVIEW_PROVIDER"
+          [ -z "$CI_REVIEW_PROVIDER" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ] && source_label="dispatch"
+          echo "::notice::Provider resolved: $provider (source=$source_label)"
 
       - name: Run /dev-kit:review via MiniMax
         if: steps.provider.outputs.provider == 'minimax'
@@ -443,15 +457,29 @@ jobs:
         id: provider
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Repo variable `CI_REVIEW_PROVIDER` (set via `gh variable set CI_REVIEW_PROVIDER <value>`)
+          # takes precedence over the workflow_dispatch input. Empty/missing falls through.
+          CI_REVIEW_PROVIDER: ${{ vars.CI_REVIEW_PROVIDER }}
         run: |
+          # Precedence: vars.CI_REVIEW_PROVIDER > github.event.inputs.review_provider > 'minimax'
+          provider="${CI_REVIEW_PROVIDER:-}"
+          if [ -z "$provider" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            provider="${{ github.event.inputs.review_provider }}"
+          fi
+          if [ -z "$provider" ]; then
+            provider="minimax"
+          fi
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "provider=${{ github.event.inputs.review_provider }}" >> "$GITHUB_OUTPUT"
             [ -z "${{ github.event.inputs.pr_number }}" ] && { echo "::error::pr_number required"; exit 1; }
             echo "pr_number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
           else
-            echo "provider=minimax" >> "$GITHUB_OUTPUT"
             echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
+          source_label="default"
+          [ -n "$CI_REVIEW_PROVIDER" ] && source_label="vars.CI_REVIEW_PROVIDER"
+          [ -z "$CI_REVIEW_PROVIDER" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ] && source_label="dispatch"
+          echo "::notice::Provider resolved: $provider (source=$source_label)"
 
       - name: Run /dev-kit:security via MiniMax
         if: steps.provider.outputs.provider == 'minimax'
