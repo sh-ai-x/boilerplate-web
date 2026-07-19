@@ -315,27 +315,58 @@ jobs:
             verdict_source="agent-output-file"
             agent_ran="true"
           else
-            # ROOT-CAUSE FIX: when the agent's output file is missing or
-            # extract-verdict.py returns nothing, default to Approve + warning
-            # instead of grepping PR comments for a stale verdict. The
-            # previous comment-grep fallback could resurrect a "Verdict:
-            # Changes Requested" from an earlier run and re-introduce gate
-            # flapping — the severity gate's "default to Approve on empty"
-            # branch never fired because the fallback ensured verdict was
-            # non-empty. Matches the gate's existing contract: empty
-            # verdict is valid; the human gate (REVIEW_REQUIRED /
-            # CHANGES_REQUESTED on the PR) is what actually blocks merge.
-            #
-            # agent_ran: only set false when the action explicitly refused
-            # to run (the bootstrap-PR remediation case at
-            # needs_fallback=true already short-circuits above; if we got
-            # here without a fallback, the action silently skipped). For
-            # job-timeout (cancelled) or genuine failure, the agent DID
-            # run — just didn't finish in time or hit a runtime error.
-            # Set agent_ran=true so the gate's hard-fail-on-skip rule
-            # doesn't fire on transient backend issues; the gate's
-            # failure-result hard-fail rule (line 718) will still catch
-            # actual job failures.
+            # Defense-in-depth (PR #26 regression): when the file
+            # exists but extract-verdict.py returned empty, the agent
+            # may still have posted its verdict as a PR comment via
+            # `gh pr comment`. Read the latest such comment from the
+            # claude[bot] account and use its Verdict line. This is
+            # the recovery path that prevented the gate from silently
+            # Approve'ing a real Blocked verdict (PR #26: 14 findings,
+            # 3 critical) where the file parser missed the verdict.
+            # Scoped to the LATEST comment matching the regex to
+            # avoid resurrecting a stale verdict from an earlier run.
+            comment_verdict=""
+            if [ -f "$AGENT_OUTPUT" ]; then
+              comment_verdict="$(
+                gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+                  --jq '.[] | select(.user.login == "claude") | .body' \
+                  2>/dev/null \
+                  | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
+                  | tail -n 1 \
+                  | sed -E 's/^Verdict:[[:space:]]*//; s/[[:space:]]*$//' \
+                  || true
+              )"
+            fi
+            if [ -n "$comment_verdict" ]; then
+              echo "::warning::review verdict recovered from latest claude[bot] PR comment (file parser empty)"
+              verdict="$comment_verdict"
+              verdict_source="agent-pr-comment-fallback"
+              agent_ran="true"
+            else
+              # ROOT-CAUSE FIX: when the agent's output file is missing
+              # or extract-verdict.py returns nothing, default to
+              # Approve + warning instead of grepping PR comments for a
+              # stale verdict. The previous comment-grep fallback could
+              # resurrect a "Verdict: Changes Requested" from an earlier
+              # run and re-introduce gate flapping — the severity
+              # gate's "default to Approve on empty" branch never fired
+              # because the fallback ensured verdict was non-empty.
+              # Matches the gate's existing contract: empty verdict is
+              # valid; the human gate (REVIEW_REQUIRED /
+              # CHANGES_REQUESTED on the PR) is what actually blocks
+              # merge.
+              #
+              # agent_ran: only set false when the action explicitly
+              # refused to run (the bootstrap-PR remediation case at
+              # needs_fallback=true already short-circuits above; if we
+              # got here without a fallback, the action silently
+              # skipped). For job-timeout (cancelled) or genuine
+              # failure, the agent DID run — just didn't finish in
+              # time or hit a runtime error. Set agent_ran=true so the
+              # gate's hard-fail-on-skip rule doesn't fire on
+              # transient backend issues; the gate's failure-result
+              # hard-fail rule (line 718) will still catch actual job
+              # failures.
             if [ -f "$AGENT_OUTPUT" ]; then
               echo "::warning::review verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
               verdict="Approve"
@@ -369,6 +400,7 @@ jobs:
                   agent_ran="false"
                   ;;
               esac
+            fi
             fi
           fi
           # ALWAYS set the outputs (don't exit early). Empty verdict is
@@ -595,23 +627,23 @@ jobs:
             echo "agent_ran=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # ROOT-CAUSE FIX (issue: gate flapped between Approve/Changes
-          # Requested because the previous post-script grepped PR comments
-          # for "Verdict: <value>"; that worked ONLY when the agent posted
-          # an explicit comment, which the model did inconsistently).
-          #
-          # Now: try to read the agent's actual output file
-          # (anthropics/claude-code-action@v1 saves the full conversation
-          # there). The file is JSON-lines; we extract the LAST
-          # "Verdict: <value>" from the assistant messages. This is
-          # authoritative because it comes from the agent itself, not from
-          # an earlier run's stale comment.
-          #
-          # Fallback: if the file is missing/empty/parse-error, default
-          # to Approve + warning. The previous comment-grep fallback
-          # resurrected stale verdicts and re-introduced gate flapping
-          # (boilerplate-web PR #18 repro, dev-harness-kit #244) — never
-          # grep PR comments for a verdict.
+          # ROOT-CAUSE FIX (PR #26 regression: gate rubber-stamped
+          # Approve while the agent had posted `Verdict: Blocked`):
+          # 1) parse the agent's actual output file (pretty-printed
+          #    JSON array written by anthropics/claude-code-action@v1's
+          #    `writeExecutionFile`).
+          # 2) if the file parser returns empty AND the file exists,
+          #    fall back to the latest claude[bot] PR comment that
+          #    contains "Verdict: <value>". This catches the case
+          #    where the agent posts the comment via `gh pr comment`
+          #    but the model doesn't repeat the verdict line in any
+          #    assistant text block — which is exactly the failure
+          #    mode that masked PR #26's Blocked verdict as a silent
+          #    Approve.
+          # 3) if both sources are empty, fall back to the prior
+          #    default-Approve + warning. Comment-fallback is scoped
+          #    to the LATEST comment matching the regex to avoid
+          #    resurrecting a stale verdict from an earlier run.
           AGENT_OUTPUT="${{ runner.temp }}/claude-execution-output.json"
           # Some action versions write the file to a slightly different
           # path; check both.
@@ -625,42 +657,64 @@ jobs:
           if [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
             verdict_source="agent-output-file"
+            agent_ran="true"
           else
-            # Same root-cause fix as the review job above: default to
-            # Approve + warning on empty verdict, never grep PR comments
-            # (the comment-grep fallback resurrected stale verdicts and
-            # re-introduced gate flapping on the boilerplate-web PR #18
-            # repro). agent_ran mirrors the same job.status check so the
-            # gate's hard-fail-on-skip rule doesn't fire on transient
-            # cancelled/failure outcomes.
+            # Defense-in-depth: when the file exists but the parser
+            # returned empty, the agent may still have posted its
+            # verdict as a PR comment via `gh pr comment`. Read the
+            # latest such comment from the agent account and use its
+            # Verdict line. This is the recovery path for the PR #26
+            # regression where extract-verdict.py returned "" on a
+            # valid Blocked comment.
+            comment_verdict=""
             if [ -f "$AGENT_OUTPUT" ]; then
-              echo "::warning::security verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
-              verdict="Approve"
-              verdict_source="default-approve-empty-file"
+              comment_verdict="$(
+                gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+                  --jq '.[] | select(.user.login == "claude") | .body' \
+                  2>/dev/null \
+                  | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
+                  | tail -n 1 \
+                  | sed -E 's/^Verdict:[[:space:]]*//; s/[[:space:]]*$//' \
+                  || true
+              )"
+            fi
+            if [ -n "$comment_verdict" ]; then
+              echo "::warning::security verdict recovered from latest claude[bot] PR comment (file parser empty)"
+              verdict="$comment_verdict"
+              verdict_source="agent-pr-comment-fallback"
               agent_ran="true"
             else
-              case "${{ job.status }}" in
-                cancelled|failure)
-                  echo "::warning::security verdict missing (job.status=${{ job.status }}; agent ran but didn't finish; output file not written); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-job-${{ job.status }}"
-                  agent_ran="true"
-                  ;;
-                *)
-                  echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}; job.status=${{ job.status }}); defaulting to Approve"
-                  verdict="Approve"
-                  verdict_source="default-approve-no-file"
-                  agent_ran="false"
-                  ;;
-              esac
+              # Same root-cause fix as the review job above: default to
+              # Approve + warning on empty verdict, never grep PR
+              # comments broadly (the prior comment-grep fallback
+              # resurrected stale verdicts and re-introduced gate
+              # flapping on the boilerplate-web PR #18 repro).
+              # agent_ran mirrors the same job.status check so the
+              # gate's hard-fail-on-skip rule doesn't fire on transient
+              # cancelled/failure outcomes.
+              if [ -f "$AGENT_OUTPUT" ]; then
+                echo "::warning::security verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
+                verdict="Approve"
+                verdict_source="default-approve-empty-file"
+                agent_ran="true"
+              else
+                case "${{ job.status }}" in
+                  cancelled|failure)
+                    echo "::warning::security verdict missing (job.status=${{ job.status }}; agent ran but didn't finish; output file not written); defaulting to Approve"
+                    verdict="Approve"
+                    verdict_source="default-approve-job-${{ job.status }}"
+                    agent_ran="true"
+                    ;;
+                  *)
+                    echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}; job.status=${{ job.status }}); defaulting to Approve"
+                    verdict="Approve"
+                    verdict_source="default-approve-no-file"
+                    agent_ran="false"
+                    ;;
+                esac
+              fi
             fi
           fi
-          # agent_ran is now set in EVERY branch of the if/case above
-          # (file_verdict success → true, file present-but-empty → true,
-          # job.status=cancelled|failure → true, no-file success →
-          # false for bootstrap-PR remediation). The previous
-          # post-hoc comment-count detector was superseded by the
-          # case-statement logic; removing it avoids an overwrite.
           echo "security_verdict=${verdict:-<none>}  source=${verdict_source}  agent_ran=${agent_ran}"
           echo "verdict=${verdict:-}" >> "$GITHUB_OUTPUT"
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
