@@ -714,8 +714,19 @@ jobs:
           R_RESULT="${{ needs.review.result }}"
           S_RESULT="${{ needs.security.result }}"
           EVENT="$EVENT_NAME"
-          echo "review=$R (result=$R_RESULT, agent_ran=$R_AGENT)"
-          echo "security=$S (result=$S_RESULT, agent_ran=$S_AGENT)"
+          # verdict_source: explicit signal from the extract-verdict step.
+          # When the action's workflow-validation guard refuses to run on a
+          # PR that modifies .github/workflows/*, the extract-verdict step
+          # sets verdict_source=needs-fallback-bootstrap-pr + agent_ran=false.
+          # This is the canonical "self-bootstrap" signal — the PR is the
+          # one that ADDS the gate's own workflow file (first install via
+          # /dev-kit:ci-setup --force, or any ci-setup refresh PR). The
+          # gate must tolerate this case; otherwise ci-setup --force
+          # alone can never bootstrap a clean repo (chicken-and-egg).
+          R_SOURCE="${{ needs.review.outputs.verdict_source }}"
+          S_SOURCE="${{ needs.security.outputs.verdict_source }}"
+          echo "review=$R (result=$R_RESULT, agent_ran=$R_AGENT, source=$R_SOURCE)"
+          echo "security=$S (result=$S_RESULT, agent_ran=$S_AGENT, source=$S_SOURCE)"
 
           # Issue #212-C1-fix: anthropics/claude-code-action@v1 exits 0 with
           # a "workflow validation skip" warning when the PR's head differs
@@ -726,7 +737,30 @@ jobs:
           # silent pass (the bootstrap-PR / PR-modifies-workflow scenario).
           # Hard-fail with a remediation message so the user knows to merge
           # the workflow change first and re-push from a clean branch.
+          #
+          # EXCEPTION: when verdict_source=needs-fallback-bootstrap-pr the
+          # extract-verdict step has already classified the skip as a
+          # self-bootstrap case (PR modifies the gate's own file). Default
+          # to Approve + ::warning:: — the human gate (REVIEW_REQUIRED on
+          # the PR) is what actually blocks merge. Without this exception
+          # `ci-setup --force` is provably insufficient (chicken-and-egg:
+          # the gate hard-fails on the very PR that ships the gate).
           if [ "$R_AGENT" = "false" ] || [ "$S_AGENT" = "false" ]; then
+            if [ "$R_SOURCE" = "needs-fallback-bootstrap-pr" ] || \
+               [ "$S_SOURCE" = "needs-fallback-bootstrap-pr" ]; then
+              echo "::warning::review+security gate: self-bootstrap PR detected"
+              echo "  review.source=$R_SOURCE verdict=$R"
+              echo "  security.source=$S_SOURCE verdict=$S"
+              echo "  anthropics/claude-code-action@v1's workflow-validation"
+              echo "  guard refused to run on this PR because its head differs"
+              echo "  from the default branch under .github/workflows/*. This is"
+              echo "  EXPECTED on the first PR after /dev-kit:ci-setup --force"
+              echo "  and on any ci-setup refresh PR. Defaulting to Approve; the"
+              echo "  human gate (REVIEW_REQUIRED on the PR) is what actually"
+              echo "  blocks merge. Future PRs without workflow modifications"
+              echo "  will run the agent normally and post real verdicts."
+              exit 0
+            fi
             {
               echo "::error::review+security gate: AI agent was skipped"
               echo "  review.agent_ran=$R_AGENT verdict=$R"
