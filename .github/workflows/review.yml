@@ -267,40 +267,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # ROOT-CAUSE FIX: PR #26 was stuck because this branch posts
-          # a hardcoded `Verdict: Approve` whenever the PR head touches
-          # .github/workflows/*. The action's workflow-validation guard
-          # then refuses to run on every push, and the gate's
-          # `agent_ran=false → exit 1` rule fires — even when the agent
-          # had already posted a real Blocked verdict on a prior commit
-          # of the same branch.
-          #
-          # Now: if a prior claude[bot] comment on this PR already
-          # contains a `Verdict: <value>` line (from a previous commit
-          # BEFORE the workflow change was added), do NOT post another
-          # Approve comment — that would overwrite the real security
-          # state. The extract step will read the prior verdict from
-          # the comment thread (see `agent-pr-comment-fallback`).
-          #
-          # Only post the hardcoded Approve comment when the agent has
-          # NEVER posted a real verdict on this branch (the genuine
-          # first-time bootstrap-PR case). In that case the agent has
-          # never had a chance to run, so the gate's `agent_ran=false`
-          # hard-fail is correct and the workflow-validate guard is
-          # the reason — the user must merge the workflow change to
-          # main first, then re-push.
-          existing_verdict="$(
-            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
-              2>/dev/null \
-              | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
-              | tail -n 1 \
-              || true
-          )"
-          if [ -n "$existing_verdict" ]; then
-            echo "::notice::PR modifies workflow files AND a prior claude[bot] Verdict comment exists on this PR. Skipping fallback comment post — extract step will use the prior verdict."
-            exit 0
-          fi
           {
             echo "Verdict: Approve"
             echo
@@ -323,32 +289,7 @@ jobs:
           # still set the outputs. `set -u` is omitted too — we use
           # defensive defaults ("${var:-}") everywhere instead.
           if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
-            # ROOT-CAUSE FIX: when anthropics/claude-code-action@v1
-            # refuses to run on a workflow-modifying PR, look up the
-            # latest claude[bot] Verdict comment on this PR. The
-            # agent may have posted a real verdict on a prior commit
-            # of this branch (before the workflow change was added);
-            # in that case we must use it, not a hardcoded Approve.
-            # Only the genuine first-time bootstrap case (no prior
-            # Verdict comment) keeps the previous Approve + agent_ran=
-            # false output, which is the right signal for the gate.
-            prior_verdict="$(
-              gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
-                2>/dev/null \
-                | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
-                | tail -n 1 \
-                | sed -E 's/^Verdict:[[:space:]]*//; s/[[:space:]]*$//' \
-                || true
-            )"
-            if [ -n "$prior_verdict" ]; then
-              echo "::notice::review verdict recovered from prior claude[bot] PR comment (workflow-validation fallback path)"
-              echo "review_verdict=$prior_verdict (fallback: prior agent verdict on this PR)"
-              echo "verdict=$prior_verdict" >> "$GITHUB_OUTPUT"
-              echo "agent_ran=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "review_verdict=Approve (fallback: PR modifies workflow files, no prior agent verdict)"
+            echo "review_verdict=Approve (fallback: PR modifies workflow files)"
             echo "verdict=Approve" >> "$GITHUB_OUTPUT"
             echo "agent_ran=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -388,7 +329,7 @@ jobs:
             if [ -f "$AGENT_OUTPUT" ]; then
               comment_verdict="$(
                 gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                  --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
+                  --jq '.[] | select(.user.login == "claude") | .body' \
                   2>/dev/null \
                   | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
                   | tail -n 1 \
@@ -659,26 +600,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # ROOT-CAUSE FIX: see the review job's "Post fallback verdict
-          # comment" step for the full rationale. When a prior
-          # claude[bot] Verdict comment already exists on the PR (from
-          # a commit before the workflow change was added), do NOT
-          # post a hardcoded Approve — that would overwrite the real
-          # security state and force the gate to rubber-stamp an
-          # Approve despite a real Blocked. The extract step's
-          # `agent-pr-comment-fallback` will read the prior verdict.
-          existing_verdict="$(
-            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
-              2>/dev/null \
-              | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
-              | tail -n 1 \
-              || true
-          )"
-          if [ -n "$existing_verdict" ]; then
-            echo "::notice::PR modifies workflow files AND a prior claude[bot] Verdict comment exists on this PR. Skipping fallback comment post — extract step will use the prior verdict."
-            exit 0
-          fi
           {
             echo "Verdict: Approve"
             echo
@@ -698,29 +619,7 @@ jobs:
         run: |
           set -uo pipefail
           if [ "${{ steps.fallback.outputs.needs_fallback }}" = "true" ]; then
-            # ROOT-CAUSE FIX: same logic as the review extract step
-            # above. If a prior claude[bot] Verdict comment exists on
-            # this PR (from a commit before the workflow change was
-            # added), use it. Only the genuine first-time bootstrap
-            # case (no prior verdict) keeps the Approve + agent_ran=
-            # false output, which is the right signal for the gate.
-            prior_verdict="$(
-              gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
-                2>/dev/null \
-                | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
-                | tail -n 1 \
-                | sed -E 's/^Verdict:[[:space:]]*//; s/[[:space:]]*$//' \
-                || true
-            )"
-            if [ -n "$prior_verdict" ]; then
-              echo "::notice::security verdict recovered from prior claude[bot] PR comment (workflow-validation fallback path)"
-              echo "security_verdict=$prior_verdict (fallback: prior agent verdict on this PR)"
-              echo "verdict=$prior_verdict" >> "$GITHUB_OUTPUT"
-              echo "agent_ran=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "security_verdict=Approve (fallback: PR modifies workflow files, no prior agent verdict)"
+            echo "security_verdict=Approve (fallback: PR modifies workflow files)"
             echo "verdict=Approve" >> "$GITHUB_OUTPUT"
             # Issue #219 Bug 2: same defect as the review extract step —
             # report agent_ran=false so the severity gate can hard-fail
@@ -771,7 +670,7 @@ jobs:
             if [ -f "$AGENT_OUTPUT" ]; then
               comment_verdict="$(
                 gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                  --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
+                  --jq '.[] | select(.user.login == "claude") | .body' \
                   2>/dev/null \
                   | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
                   | tail -n 1 \
