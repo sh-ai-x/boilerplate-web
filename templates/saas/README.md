@@ -43,3 +43,11 @@ where email = 'you@example.com';
   customer_key, turnstile_token }` only; price is fetched from `plans` in
   the Edge Function.
 - **Admin pages are server-gated** by `auth.jwt() ->> 'role' = 'admin'`.
+
+## Dependency reproducibility (A03)
+This package is a member of the pnpm workspace. Its dependency versions are
+pinned by the committed workspace-root `pnpm-lock.yaml`; pnpm does not emit a
+per-package lockfile inside a workspace. CI installs with
+`pnpm install --frozen-lockfile`, so builds are byte-for-byte reproducible.
+When the template is scaffolded standalone, run `pnpm install` once to
+generate a project-local `pnpm-lock.yaml` and commit it.
