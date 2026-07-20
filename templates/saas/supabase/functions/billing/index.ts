@@ -157,14 +157,20 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'method_not_allowed' }, 405);
   }
 
-  let body: Partial<BillingRequest>;
+  let body: unknown;
   try {
     body = await req.json();
   } catch (_) {
     return jsonResponse({ error: 'invalid_json' }, 400);
   }
+  // A10: req.json() returns any JSON value, including null / arrays / primitives.
+  // The next line destructures body, so a null body crashes with a 500 instead
+  // of producing a clean 400. Validate the shape BEFORE destructuring.
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    return jsonResponse({ error: 'invalid_body' }, 400);
+  }
 
-  const { plan_id, customer_key, turnstile_token, auth_key } = body;
+  const { plan_id, customer_key, turnstile_token, auth_key } = body as Partial<BillingRequest>;
   if (!plan_id || typeof plan_id !== 'string') {
     return jsonResponse({ error: 'missing plan_id' }, 400);
   }
