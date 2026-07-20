@@ -29,6 +29,10 @@ interface BillingRequest {
   plan_id: string;
   customer_key: string;
   turnstile_token: string;
+  // A07: authKey is the single-use token returned by the client-side Toss
+  // card-auth flow. Toss /v1/billing/authorizations/issue requires it; the
+  // previous body omitted it, so every call was rejected as malformed.
+  auth_key: string;
   // NOTE: any extra `amount` / `price` field here is IGNORED on purpose.
   // NOTE: `customer_key` is validated for schema-compat but NEVER trusted as
   // the provider customerKey — that is derived from the authenticated user.
@@ -88,8 +92,8 @@ async function fetchPlan(
 async function issueBillingKey(args: {
   auth: string;
   customerKey: string;
+  authKey: string;
   planKey: string;
-  amount: number;
   idempotencyKey: string;
 }): Promise<{ billingKey: string } | { error: string }> {
   // A10: 10s timeout + top-level catch around the Toss call.
@@ -106,9 +110,12 @@ async function issueBillingKey(args: {
         'idempotency-key': args.idempotencyKey,
       },
       body: JSON.stringify({
+        // A07: Toss /v1/billing/authorizations/issue expects customerKey +
+        // authKey + plan. The amount is set when BILLING the key (separate
+        // endpoint), NOT at issue time, so we no longer send amount/orderId
+        // in this body.
         customerKey: args.customerKey,
-        amount: { value: args.amount, currency: 'KRW' },
-        orderId: args.idempotencyKey,
+        authKey: args.authKey,
         plan: args.planKey,
       }),
       signal: ctrl.signal,
@@ -157,7 +164,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'invalid_json' }, 400);
   }
 
-  const { plan_id, customer_key, turnstile_token } = body;
+  const { plan_id, customer_key, turnstile_token, auth_key } = body;
   if (!plan_id || typeof plan_id !== 'string') {
     return jsonResponse({ error: 'missing plan_id' }, 400);
   }
@@ -166,6 +173,9 @@ Deno.serve(async (req: Request) => {
   }
   if (!turnstile_token || typeof turnstile_token !== 'string') {
     return jsonResponse({ error: 'missing turnstile_token' }, 400);
+  }
+  if (!auth_key || typeof auth_key !== 'string') {
+    return jsonResponse({ error: 'missing auth_key' }, 400);
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
@@ -230,8 +240,8 @@ Deno.serve(async (req: Request) => {
   const result = await issueBillingKey({
     auth: tossAuth,
     customerKey: customerKey,
+    authKey: auth_key,
     planKey: plan.external_plan_key,
-    amount: plan.price_cents,
     idempotencyKey: idempotencyKey,
   });
   if ('error' in result) {
