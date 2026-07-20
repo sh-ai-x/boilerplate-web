@@ -82,20 +82,24 @@ async function verifyTurnstile(token: string, secretKey: string): Promise<boolea
   }
 }
 
+type PlanInterval = 'month' | 'year';
+
 async function fetchPlan(
   supabase: ReturnType<typeof createClient>,
   planId: string
-): Promise<{ price_cents: number; external_plan_key: string } | null> {
-  // supabase-js: equivalent of SELECT price_cents, external_plan_key FROM plans WHERE id = $1
+): Promise<{ price_cents: number; external_plan_key: string; interval: PlanInterval } | null> {
+  // supabase-js: equivalent of SELECT price_cents, external_plan_key, interval
+  // FROM plans WHERE id = $1
   const { data, error } = await supabase
     .from('plans')
-    .select('price_cents, external_plan_key')
+    .select('price_cents, external_plan_key, interval')
     .eq('id', planId)
     .single();
   if (error || !data) return null;
   return {
     price_cents: data.price_cents as number,
     external_plan_key: data.external_plan_key as string,
+    interval: (data.interval as PlanInterval) ?? 'month',
   };
 }
 
@@ -270,8 +274,15 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: result.error }, 502);
   }
 
+  // A04: next-bill date must respect the plan's interval. The previous
+  // implementation hard-coded +1 month, so a yearly plan was scheduled to
+  // bill again in 30 days (12x oversell). Branch on plan.interval.
   const nextBill = new Date();
-  nextBill.setMonth(nextBill.getMonth() + 1);
+  if (plan.interval === 'year') {
+    nextBill.setFullYear(nextBill.getFullYear() + 1);
+  } else {
+    nextBill.setMonth(nextBill.getMonth() + 1);
+  }
   const { data: sub, error: subErr } = await supabase
     .from('subscriptions')
     .insert({
