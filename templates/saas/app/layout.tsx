@@ -8,6 +8,13 @@ export const metadata = {
   description: 'Next.js + Supabase + Toss billing-key boilerplate',
 };
 
+// A10: only the "env not configured" case may be swallowed to a logged-out
+// render. Any other error (a real auth/session failure) must surface via
+// console.error so operational problems are not masked as "logged out".
+function isMissingEnvError(err: unknown): boolean {
+  return err instanceof Error && /Missing required env/.test(err.message);
+}
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   // Server-side session check. The cookie store is wired through here.
   let sessionUser: { email?: string | null } | null = null;
@@ -19,8 +26,12 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     });
     const { data } = await supabase.auth.getUser();
     sessionUser = data.user ? { email: data.user.email } : null;
-  } catch (_) {
-    // env not set in dev; render as logged-out
+  } catch (err) {
+    if (!isMissingEnvError(err)) {
+      // Operational auth failure — do not silently degrade to logged-out.
+      console.error('RootLayout auth check failed:', err);
+    }
+    sessionUser = null;
   }
 
   return (
