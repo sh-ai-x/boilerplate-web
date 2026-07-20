@@ -374,30 +374,31 @@ jobs:
             verdict_source="agent-output-file"
             agent_ran="true"
           else
-            # Defense-in-depth (PR #26 regression): when the file
-            # exists but extract-verdict.py returned empty, the agent
-            # may still have posted its verdict as a PR comment via
-            # `gh pr comment`. Read the latest such comment from the
-            # claude[bot] account and use its Verdict line. This is
-            # the recovery path that prevented the gate from silently
-            # Approve'ing a real Blocked verdict (PR #26: 14 findings,
-            # 3 critical) where the file parser missed the verdict.
-            # Scoped to the LATEST comment matching the regex to
-            # avoid resurrecting a stale verdict from an earlier run.
-            comment_verdict=""
-            if [ -f "$AGENT_OUTPUT" ]; then
-              comment_verdict="$(
-                gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                  --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
-                  2>/dev/null \
-                  | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
-                  | tail -n 1 \
-                  | sed -E 's/^Verdict:[[:space:]]*//; s/[[:space:]]*$//' \
-                  || true
-              )"
-            fi
+            # Defense-in-depth (PR #26 regression): the agent may have
+            # posted its verdict as a PR comment via `gh pr comment`
+            # even when the action's output file is missing (e.g. the
+            # job was cancelled by the 20-min hard cap after the
+            # comment was posted, but before `writeExecutionFile`
+            # could run). The original PR #26 hit this exact failure
+            # mode: the latest claude[bot] comment said
+            # `Verdict: Blocked`, the file was missing, and the
+            # extract step defaulted to Approve — letting the gate pass
+            # despite a real security finding. We now ALWAYS try the
+            # comment-fallback when the file-verdict is empty,
+            # regardless of whether the file exists. Scoped to the
+            # LATEST matching comment to avoid resurrecting a stale
+            # verdict from an earlier run.
+            comment_verdict="$(
+              gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+                --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
+                2>/dev/null \
+                | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
+                | tail -n 1 \
+                | sed -E 's/^Verdict:[[:space:]]*//; s/[[:space:]]*$//' \
+                || true
+            )"
             if [ -n "$comment_verdict" ]; then
-              echo "::warning::review verdict recovered from latest claude[bot] PR comment (file parser empty)"
+              echo "::warning::review verdict recovered from latest claude[bot] PR comment (file-verdict empty)"
               verdict="$comment_verdict"
               verdict_source="agent-pr-comment-fallback"
               agent_ran="true"
@@ -760,27 +761,31 @@ jobs:
             verdict_source="agent-output-file"
             agent_ran="true"
           else
-            # Defense-in-depth: when the file exists but the parser
-            # returned empty, the agent may still have posted its
-            # verdict as a PR comment via `gh pr comment`. Read the
-            # latest such comment from the agent account and use its
-            # Verdict line. This is the recovery path for the PR #26
-            # regression where extract-verdict.py returned "" on a
-            # valid Blocked comment.
-            comment_verdict=""
-            if [ -f "$AGENT_OUTPUT" ]; then
-              comment_verdict="$(
-                gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                  --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
-                  2>/dev/null \
-                  | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
-                  | tail -n 1 \
-                  | sed -E 's/^Verdict:[[:space:]]*//; s/[[:space:]]*$//' \
-                  || true
-              )"
-            fi
+            # Defense-in-depth (PR #26 regression): the agent may have
+            # posted its verdict as a PR comment via `gh pr comment`
+            # even when the action's output file is missing (e.g. the
+            # job was cancelled by the 20-min hard cap after the
+            # comment was posted, but before `writeExecutionFile`
+            # could run). The original PR #26 hit this exact failure
+            # mode: the latest claude[bot] comment said
+            # `Verdict: Blocked`, the file was missing, and the
+            # extract step defaulted to Approve — letting the gate pass
+            # despite a real security finding. We now ALWAYS try the
+            # comment-fallback when the file-verdict is empty,
+            # regardless of whether the file exists. Scoped to the
+            # LATEST matching comment to avoid resurrecting a stale
+            # verdict from an earlier run.
+            comment_verdict="$(
+              gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+                --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
+                2>/dev/null \
+                | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
+                | tail -n 1 \
+                | sed -E 's/^Verdict:[[:space:]]*//; s/[[:space:]]*$//' \
+                || true
+            )"
             if [ -n "$comment_verdict" ]; then
-              echo "::warning::security verdict recovered from latest claude[bot] PR comment (file parser empty)"
+              echo "::warning::security verdict recovered from latest claude[bot] PR comment (file-verdict empty)"
               verdict="$comment_verdict"
               verdict_source="agent-pr-comment-fallback"
               agent_ran="true"
