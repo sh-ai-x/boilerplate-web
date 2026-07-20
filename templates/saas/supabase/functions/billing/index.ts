@@ -38,10 +38,20 @@ interface BillingRequest {
   // the provider customerKey — that is derived from the authenticated user.
 }
 
+// A05: CORS — every response (including error paths) must echo the allowed
+// origin + methods, otherwise the browser blocks the response and the user
+// sees a CORS error in the console instead of the real failure reason.
+const CORS_HEADERS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'POST, OPTIONS',
+  'access-control-allow-headers': 'authorization, content-type, apikey, x-client-info',
+  'access-control-max-age': '86400',
+};
+
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...CORS_HEADERS },
   });
 }
 
@@ -153,6 +163,11 @@ async function deleteBillingKey(auth: string, billingKey: string): Promise<void>
 }
 
 Deno.serve(async (req: Request) => {
+  // A05: browser preflight. Without an OPTIONS branch the browser never gets
+  // past preflight and the user sees a generic CORS error in DevTools.
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
   if (req.method !== 'POST') {
     return jsonResponse({ error: 'method_not_allowed' }, 405);
   }
