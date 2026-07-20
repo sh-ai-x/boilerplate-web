@@ -1,30 +1,45 @@
--- 0002_audit_log.sql — actor-attributed audit trail + subscription dedupe guard
--- A09: privileged admin mutations (plan price / external-plan-key changes) and
---      other sensitive actions must be recorded with the acting user's id.
--- A06: defense-in-depth against duplicate active subscriptions.
+-- 0002_audit_log.sql — additive hardening on top of 0001_init.sql.
+--
+-- Adds:
+--   - a SECURITY DEFINER helper auth.app_role() that exposes the JWT
+--     `app_metadata.role` claim (the top-level `auth.jwt()->>role` is the
+--     PostgREST role, NOT the app role).
+--   - an admin-only SELECT policy on audit_log that calls auth.app_role().
+--   - a partial unique index on subscriptions ensuring at most one active
+--     row per (user, plan) — defends against duplicate-provider-billing-key
+--     races even if the application-layer pre-check loses the race.
+--
+-- All statements are ADDITIVE: no DROP TABLE / no CREATE TABLE of existing
+-- objects (the tables are owned by 0001_init.sql).
 
-create table if not exists public.audit_log (
-  id uuid primary key default gen_random_uuid(),
-  actor_id uuid references auth.users(id) on delete set null,
-  action text not null,
-  before jsonb,
-  after jsonb,
-  created_at timestamptz not null default now()
-);
+-- ---------------------------------------------------------------------------
+-- auth.app_role() — read app_metadata.role from the request JWT.
+-- ---------------------------------------------------------------------------
+create or replace function auth.app_role()
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    ((auth.jwt() -> 'app_metadata' ->> 'role'))::text,
+    ''
+  );
+$$;
 
-alter table public.audit_log enable row level security;
-
--- Only admins may read the audit trail. Writes happen through the service-role
--- key, which bypasses RLS, so no insert policy is granted to end users.
+-- ---------------------------------------------------------------------------
+-- audit_log SELECT policy — admin-only, via auth.app_role().
+-- ---------------------------------------------------------------------------
 drop policy if exists "audit_log_admin_read" on public.audit_log;
 create policy "audit_log_admin_read"
   on public.audit_log for select
   to authenticated
-  using (auth.jwt() ->> 'role' = 'admin');
+  using (auth.app_role() = 'admin');
 
--- A06: a user may hold at most one active subscription per plan. This makes
--- retried billing requests idempotent at the database layer even if the
--- application-level pre-check races.
+-- ---------------------------------------------------------------------------
+-- A06: at-most-one-active-subscription per (user, plan).
+-- ---------------------------------------------------------------------------
 create unique index if not exists subscriptions_one_active_per_plan
   on public.subscriptions (user_id, plan_id)
   where status = 'active';
