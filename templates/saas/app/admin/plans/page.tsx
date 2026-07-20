@@ -1,9 +1,9 @@
 
 export const dynamic = 'force-dynamic';
 import { redirect } from 'next/navigation';
-import { createServerSupabase } from '@boilerplate-web/shared/supabase';
-import { createServiceSupabase } from '@boilerplate-web/shared/supabase';
 import { cookies } from 'next/headers';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createServiceSupabase } from '@boilerplate-web/shared/supabase';
 
 interface Plan {
   id: string;
@@ -13,12 +13,43 @@ interface Plan {
   external_plan_key: string | null;
 }
 
-async function requireAdminOrRedirect(): Promise<void> {
+// A07: the shared createServerSupabase() helper built a bare @supabase/supabase-js
+// client that never read request cookies, so auth.getUser() could not resolve the
+// caller's session and every admin page redirected. The cookie-backed
+// @supabase/ssr createServerClient is what actually threads the request's auth
+// cookie into Supabase auth storage.
+function getSupabaseForRequest() {
   const cookieStore = cookies();
-  const supabase = createServerSupabase({
-    get: (n) => cookieStore.get(n),
-    set: (n, v, o) => cookieStore.set(n, v, o as never),
-  });
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value, ...options });
+          } catch (_err) {
+            // Server Components cannot set cookies. Server Action path uses a
+            // separate request where set() is allowed; this is non-fatal.
+          }
+        },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value: '', ...options });
+          } catch (_err) {
+            // See note above.
+          }
+        },
+      },
+    }
+  );
+}
+
+async function requireAdminOrRedirect(): Promise<void> {
+  const supabase = getSupabaseForRequest();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/');
   const role = (user.app_metadata as { role?: string } | null)?.role;
@@ -40,11 +71,7 @@ async function upsertPlan(formData: FormData): Promise<void> {
   // A01: the page guard only protects the render path. This Server Action is a
   // separately-invokable endpoint, so it MUST re-derive the caller from the
   // request cookie store and assert admin BEFORE any service-role mutation.
-  const cookieStore = cookies();
-  const authClient = createServerSupabase({
-    get: (n) => cookieStore.get(n),
-    set: (n, v, o) => cookieStore.set(n, v, o as never),
-  });
+  const authClient = getSupabaseForRequest();
   const { data: { user } } = await authClient.auth.getUser();
   const role = (user?.app_metadata as { role?: string } | null)?.role;
   if (!user || role !== 'admin') {
@@ -69,19 +96,22 @@ async function upsertPlan(formData: FormData): Promise<void> {
       .eq('id', id)
       .maybeSingle();
     before = (prior as Plan) ?? null;
-    await supabase.from('plans').update(payload).eq('id', id);
+    const { error: updateErr } = await supabase.from('plans').update(payload).eq('id', id);
+    if (updateErr) throw new Error('update_failed');
   } else {
-    await supabase.from('plans').insert(payload);
+    const { error: insertErr } = await supabase.from('plans').insert(payload);
+    if (insertErr) throw new Error('insert_failed');
   }
 
   // A09: privileged price / external-plan-key mutations must leave an
   // actor-attributed audit record. Written via the service-role client.
-  await supabase.from('audit_log').insert({
+  const { error: auditErr } = await supabase.from('audit_log').insert({
     actor_id: user.id,
     action: 'plans.upsert',
     before,
     after: payload,
   });
+  if (auditErr) throw new Error('audit_failed');
 }
 
 export default async function AdminPlansPage() {
