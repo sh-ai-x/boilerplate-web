@@ -112,3 +112,74 @@ $$;
 
 revoke all on function public.claim_toss_billing_key_cleanup(text) from public;
 grant execute on function public.claim_toss_billing_key_cleanup(text) to service_role;
+
+
+-- ---------------------------------------------------------------------------
+-- upsert_plan_with_audit() — A09 transactional plan write + audit insert.
+--
+-- The admin Server Action MUST be atomic: the plans write and the
+-- audit_log insert must both succeed or neither must be recorded.
+-- Wrapping both in a single SECURITY DEFINER function achieves this in
+-- a single round-trip and returns the audit row id to the caller.
+-- ---------------------------------------------------------------------------
+create or replace function public.upsert_plan_with_audit(
+  actor_id uuid,
+  plan_id_in uuid,
+  payload jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_plan_id uuid;
+  v_before jsonb;
+  v_audit_id uuid;
+begin
+  if payload is null or jsonb_typeof(payload) <> 'object' then
+    raise exception 'payload must be a json object';
+  end if;
+
+  -- Capture prior state for the audit diff (NULL on insert).
+  if plan_id_in is not null then
+    select to_jsonb(p) into v_before
+    from public.plans p
+    where p.id = plan_id_in;
+    if v_before is null then
+      raise exception 'plan_not_found';
+    end if;
+
+    update public.plans
+       set name              = payload ->> 'name',
+           price_cents       = (payload ->> 'price_cents')::int,
+           interval          = payload ->> 'interval',
+           external_plan_key = payload ->> 'external_plan_key',
+           updated_at        = now()
+     where id = plan_id_in;
+  else
+    insert into public.plans (name, price_cents, interval, external_plan_key)
+    values (
+      payload ->> 'name',
+      (payload ->> 'price_cents')::int,
+      payload ->> 'interval',
+      payload ->> 'external_plan_key'
+    )
+    returning id into v_plan_id;
+  end if;
+
+  insert into public.audit_log (actor_id, action, before, after)
+  values (
+    actor_id,
+    'plans.upsert',
+    v_before,
+    payload
+  )
+  returning id into v_audit_id;
+
+  return v_audit_id;
+end;
+$$;
+
+revoke all on function public.upsert_plan_with_audit(uuid, uuid, jsonb) from public;
+grant execute on function public.upsert_plan_with_audit(uuid, uuid, jsonb) to service_role;

@@ -87,31 +87,20 @@ async function upsertPlan(formData: FormData): Promise<void> {
     external_plan_key: String(formData.get('external_plan_key') ?? '') || null,
   };
 
-  // Capture prior state so the audit trail records a full before/after diff.
-  let before: Plan | null = null;
-  if (id) {
-    const { data: prior } = await supabase
-      .from('plans')
-      .select('id, name, price_cents, interval, external_plan_key')
-      .eq('id', id)
-      .maybeSingle();
-    before = (prior as Plan) ?? null;
-    const { error: updateErr } = await supabase.from('plans').update(payload).eq('id', id);
-    if (updateErr) throw new Error('update_failed');
-  } else {
-    const { error: insertErr } = await supabase.from('plans').insert(payload);
-    if (insertErr) throw new Error('insert_failed');
-  }
-
-  // A09: privileged price / external-plan-key mutations must leave an
-  // actor-attributed audit record. Written via the service-role client.
-  const { error: auditErr } = await supabase.from('audit_log').insert({
+  // A09: plan upsert + audit insert MUST be a single database transaction.
+  // Calling .update()/.insert() then .from('audit_log').insert() separately
+  // means a service-role failure between the two would leave the audit trail
+  // silent (privileged mutation recorded nowhere). upsert_plan_with_audit()
+  // wraps both in one plpgsql block and returns the audit row id, so we get
+  // atomicity + a single round-trip.
+  const { error: rpcErr } = await supabase.rpc('upsert_plan_with_audit', {
     actor_id: user.id,
-    action: 'plans.upsert',
-    before,
-    after: payload,
+    plan_id_in: id ?? null,
+    payload,
   });
-  if (auditErr) throw new Error('audit_failed');
+  if (rpcErr) {
+    throw new Error(`upsert_plan_with_audit failed: ${rpcErr.message}`);
+  }
 }
 
 export default async function AdminPlansPage() {
