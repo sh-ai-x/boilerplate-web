@@ -295,9 +295,22 @@ Deno.serve(async (req: Request) => {
     .select('id')
     .single();
   if (subErr || !sub) {
-    // A10: the Toss billing key is now orphaned — best-effort delete so it is
-    // not left dangling on the provider side. Cleanup never throws.
-    await deleteBillingKey(tossAuth, result.billingKey);
+    // A04: a concurrent request may have inserted an active subscription for
+    // the same (user, plan) and grabbed the Toss billing key first (or the
+    // idempotency-key reuse means our key IS in the DB under someone else's
+    // row). Atomically check: if our key is referenced, KEEP it on Toss;
+    // otherwise it is safe to delete. The check + abandon-mark happen in a
+    // single statement so the unique-index loser cannot delete the winner.
+    const { data: keepKey } = await supabase.rpc('claim_toss_billing_key_cleanup', {
+      p_billing_key: result.billingKey,
+    });
+    if (keepKey !== true) {
+      // A10: best-effort delete so an orphaned Toss key is not left dangling.
+      // Cleanup never throws.
+      await deleteBillingKey(tossAuth, result.billingKey);
+    } else {
+      logEvent('billing_key_kept', { user_id: userId, plan_id, reason: 'cas_winner' });
+    }
     logEvent('subscription_insert_failed', { user_id: userId, plan_id });
     return jsonResponse({ error: 'subscription_insert_failed' }, 500);
   }
