@@ -291,7 +291,7 @@ jobs:
           # main first, then re-push.
           existing_verdict="$(
             gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              --jq '.[] | select(.user.login == "claude") | .body' \
+              --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
               2>/dev/null \
               | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
               | tail -n 1 \
@@ -334,7 +334,7 @@ jobs:
             # false output, which is the right signal for the gate.
             prior_verdict="$(
               gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                --jq '.[] | select(.user.login == "claude") | .body' \
+                --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
                 2>/dev/null \
                 | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
                 | tail -n 1 \
@@ -388,7 +388,7 @@ jobs:
             if [ -f "$AGENT_OUTPUT" ]; then
               comment_verdict="$(
                 gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                  --jq '.[] | select(.user.login == "claude") | .body' \
+                  --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
                   2>/dev/null \
                   | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
                   | tail -n 1 \
@@ -669,7 +669,7 @@ jobs:
           # `agent-pr-comment-fallback` will read the prior verdict.
           existing_verdict="$(
             gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              --jq '.[] | select(.user.login == "claude") | .body' \
+              --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
               2>/dev/null \
               | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
               | tail -n 1 \
@@ -706,7 +706,7 @@ jobs:
             # false output, which is the right signal for the gate.
             prior_verdict="$(
               gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                --jq '.[] | select(.user.login == "claude") | .body' \
+                --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
                 2>/dev/null \
                 | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
                 | tail -n 1 \
@@ -771,7 +771,7 @@ jobs:
             if [ -f "$AGENT_OUTPUT" ]; then
               comment_verdict="$(
                 gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                  --jq '.[] | select(.user.login == "claude") | .body' \
+                  --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
                   2>/dev/null \
                   | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
                   | tail -n 1 \
