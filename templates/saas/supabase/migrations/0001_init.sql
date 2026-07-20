@@ -76,3 +76,39 @@ create index if not exists audit_log_created_at_idx
   on public.audit_log (created_at desc);
 
 alter table public.audit_log enable row level security;
+
+
+-- ---------------------------------------------------------------------------
+-- claim_toss_billing_key_cleanup() — A04 atomic CAS for billing-key cleanup.
+--
+-- Called by the Edge Function after a failed subscriptions INSERT. Returns
+-- TRUE if THIS function's billing_key is still referenced in subscriptions
+-- (a concurrent request won the race, so the Toss key must NOT be deleted —
+-- it is the winner's key). Returns FALSE if no row has this billing_key
+-- (the orphan is safe to delete from Toss).
+--
+-- SECURITY DEFINER + locked search_path so the Edge Function can call it via
+-- the service-role client without granting the anon role any extra privileges.
+-- ---------------------------------------------------------------------------
+create or replace function public.claim_toss_billing_key_cleanup(p_billing_key text)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_id uuid;
+begin
+  update public.subscriptions
+     set status = 'abandoned', updated_at = now()
+   where billing_key = p_billing_key
+   returning id into v_id;
+
+  -- true  => our key is in the DB; do NOT delete (winner depends on it).
+  -- false => no row has our key; safe to delete from Toss.
+  return v_id is not null;
+end;
+$$;
+
+revoke all on function public.claim_toss_billing_key_cleanup(text) from public;
+grant execute on function public.claim_toss_billing_key_cleanup(text) to service_role;
