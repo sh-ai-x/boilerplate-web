@@ -37,7 +37,20 @@ async function fetchPlans(): Promise<Plan[]> {
 
 async function upsertPlan(formData: FormData): Promise<void> {
   'use server';
-  // Server action. Service-role writes; admin role was enforced on the page.
+  // A01: the page guard only protects the render path. This Server Action is a
+  // separately-invokable endpoint, so it MUST re-derive the caller from the
+  // request cookie store and assert admin BEFORE any service-role mutation.
+  const cookieStore = cookies();
+  const authClient = createServerSupabase({
+    get: (n) => cookieStore.get(n),
+    set: (n, v, o) => cookieStore.set(n, v, o as never),
+  });
+  const { data: { user } } = await authClient.auth.getUser();
+  const role = (user?.app_metadata as { role?: string } | null)?.role;
+  if (!user || role !== 'admin') {
+    throw new Error('forbidden');
+  }
+
   const supabase = createServiceSupabase();
   const id = (formData.get('id') as string) || undefined;
   const payload = {
@@ -46,11 +59,29 @@ async function upsertPlan(formData: FormData): Promise<void> {
     interval: String(formData.get('interval') ?? 'month') as 'month' | 'year',
     external_plan_key: String(formData.get('external_plan_key') ?? '') || null,
   };
+
+  // Capture prior state so the audit trail records a full before/after diff.
+  let before: Plan | null = null;
   if (id) {
+    const { data: prior } = await supabase
+      .from('plans')
+      .select('id, name, price_cents, interval, external_plan_key')
+      .eq('id', id)
+      .maybeSingle();
+    before = (prior as Plan) ?? null;
     await supabase.from('plans').update(payload).eq('id', id);
   } else {
     await supabase.from('plans').insert(payload);
   }
+
+  // A09: privileged price / external-plan-key mutations must leave an
+  // actor-attributed audit record. Written via the service-role client.
+  await supabase.from('audit_log').insert({
+    actor_id: user.id,
+    action: 'plans.upsert',
+    before,
+    after: payload,
+  });
 }
 
 export default async function AdminPlansPage() {
