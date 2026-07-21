@@ -60,7 +60,7 @@ function logEvent(event: string, fields: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ event, timestamp: new Date().toISOString(), ...fields }));
 }
 
-async function verifyTurnstile(token: string, secretKey: string): Promise<boolean> {
+async function verifyTurnstile(token: string, secretKey: string, expectedHostname?: string, expectedAction?: string): Promise<boolean> {
   // A10: 5s timeout + top-level catch so a hung Cloudflare call cannot stall us.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TURNSTILE_TIMEOUT_MS);
@@ -72,8 +72,30 @@ async function verifyTurnstile(token: string, secretKey: string): Promise<boolea
       signal: ctrl.signal,
     });
     if (!res.ok) return false;
-    const data = await res.json() as { success?: boolean };
-    return data.success === true;
+    // A10: Cloudflare siteverify returns { success, hostname, action, ... }
+    // when validation succeeds. A naive `data.success === true` check
+    // accepts tokens issued for ANY hostname (the cloudflare-attacker-
+    // on-attacker-host scenario) and ANY action (so a /login widget token
+    // can be replayed against /billing). Pin both fields server-side.
+    const data = await res.json() as {
+      success?: boolean;
+      hostname?: string;
+      action?: string;
+      'error-codes'?: string[];
+    };
+    if (data.success !== true) {
+      logEvent('turnstile_failed', { reason: 'success_false', errors: data['error-codes'] ?? [] });
+      return false;
+    }
+    if (expectedHostname && data.hostname !== expectedHostname) {
+      logEvent('turnstile_failed', { reason: 'hostname_mismatch', expected: expectedHostname, got: data.hostname });
+      return false;
+    }
+    if (expectedAction && data.action !== expectedAction) {
+      logEvent('turnstile_failed', { reason: 'action_mismatch', expected: expectedAction, got: data.action });
+      return false;
+    }
+    return true;
   } catch (_err) {
     logEvent('turnstile_error', { reason: 'fetch_failed_or_timeout' });
     return false;
@@ -81,8 +103,6 @@ async function verifyTurnstile(token: string, secretKey: string): Promise<boolea
     clearTimeout(timer);
   }
 }
-
-type PlanInterval = 'month' | 'year';
 
 // A04: clamp the day to the last day of the target month. Without this
 // guard, setMonth(+1) on Jan 31 rolls over to Mar 3 (Feb has 28 days),
@@ -249,7 +269,13 @@ Deno.serve(async (req: Request) => {
   const customerKey = userId;
 
   const turnstileSecret = Deno.env.get('TURNSTILE_SECRET_KEY') ?? '';
-  const turnstileOk = await verifyTurnstile(turnstile_token, turnstileSecret);
+  // A10: pin the token to the hostname the page was served from and
+  // to the widget's configured action (TURNSTILE_EXPECTED_ACTION,
+  // default 'subscribe') so a token issued for a different origin or
+  // a different widget action cannot be replayed against /billing.
+  const expectedHostname = Deno.env.get('TURNSTILE_EXPECTED_HOSTNAME') ?? '';
+  const expectedAction = Deno.env.get('TURNSTILE_EXPECTED_ACTION') ?? 'subscribe';
+  const turnstileOk = await verifyTurnstile(turnstile_token, turnstileSecret, expectedHostname || undefined, expectedAction);
   if (!turnstileOk) {
     logEvent('turnstile_failed', { user_id: userId });
     return jsonResponse({ error: 'turnstile_failed' }, 400);

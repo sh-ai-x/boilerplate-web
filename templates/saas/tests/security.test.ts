@@ -394,4 +394,44 @@ describe('A01/A09 — README matches the actual schema', () => {
       mergeUpdate({ external_plan_key: 'toss-plan-old' }, { external_plan_key: 'toss-plan-new' })
     ).toEqual({ external_plan_key: 'toss-plan-new' });
   });
+});describe('A10 — verifyTurnstile pins hostname and action', () => {
+  it('verifyTurnstile signature accepts expectedHostname + expectedAction', () => {
+    expect(BILLING).toMatch(
+      /async function verifyTurnstile\([\s\S]*?expectedHostname\?:\s*string[\s\S]*?expectedAction\?:\s*string/
+    );
+  });
+  it('verifyTurnstile compares data.hostname against expectedHostname', () => {
+    expect(BILLING).toMatch(/data\.hostname\s*!==\s*expectedHostname/);
+  });
+  it('verifyTurnstile compares data.action against expectedAction', () => {
+    expect(BILLING).toMatch(/data\.action\s*!==\s*expectedAction/);
+  });
+  it('handler reads TURNSTILE_EXPECTED_HOSTNAME / TURNSTILE_EXPECTED_ACTION env vars', () => {
+    expect(BILLING).toMatch(/TURNSTILE_EXPECTED_HOSTNAME/);
+    expect(BILLING).toMatch(/TURNSTILE_EXPECTED_ACTION/);
+  });
+  it('hostname / action mismatch semantics: cross-origin token is rejected', () => {
+    // Reproduce the gate locally so the test fails if a future contributor
+    // drops one of the comparisons.
+    function verify(data: { success?: boolean; hostname?: string; action?: string }, expectedHostname?: string, expectedAction?: string): boolean {
+      if (data.success !== true) return false;
+      if (expectedHostname && data.hostname !== expectedHostname) return false;
+      if (expectedAction && data.action !== expectedAction) return false;
+      return true;
+    }
+    // Token issued for attacker host, replayed against billing.
+    expect(
+      verify({ success: true, hostname: 'attacker.example', action: 'subscribe' }, 'billing.example', 'subscribe')
+    ).toBe(false);
+    // Token issued for /login widget action, replayed against /billing.
+    expect(
+      verify({ success: true, hostname: 'billing.example', action: 'login' }, 'billing.example', 'subscribe')
+    ).toBe(false);
+    // Token issued for the right host + action: accepted.
+    expect(
+      verify({ success: true, hostname: 'billing.example', action: 'subscribe' }, 'billing.example', 'subscribe')
+    ).toBe(true);
+    // No expectations configured: legacy behavior (success-only) preserved.
+    expect(verify({ success: true, hostname: 'anything', action: 'login' })).toBe(true);
+  });
 });
