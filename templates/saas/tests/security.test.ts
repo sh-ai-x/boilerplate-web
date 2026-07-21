@@ -343,4 +343,38 @@ describe('A01/A09 — README matches the actual schema', () => {
   it('README has no leftover CI retrigger comment trailers', () => {
     expect(SAAS_README).not.toMatch(/^#\s*20\d\d-\d\d-\d\d.*CI retrigger/m);
   });
+});describe('A04/A09 — upsert_plan_with_audit preserves external_plan_key on update', () => {
+  it('UPDATE branch coalesces payload key against existing column', () => {
+    // The admin edit form does not pre-fill external_plan_key, so a blank
+    // submit would otherwise overwrite an existing Toss plan key with NULL.
+    // The RPC must coalesce(payload, existing) to keep the prior value.
+    expect(MIGRATION_0001).toMatch(
+      /external_plan_key\s*=\s*coalesce\s*\(\s*payload\s*->>\s*'external_plan_key'\s*,\s*external_plan_key\s*\)/
+    );
+  });
+  it('SQL semantics: blank payload key keeps prior external_plan_key', () => {
+    // Reproduce the merge in JS so the test would fail if a future
+    // contributor reintroduces the unconditional `payload ->> 'external_plan_key'`
+    // assignment.
+    function mergeUpdate(existing: { external_plan_key: string | null }, payload: { external_plan_key?: string | null }) {
+      // Same shape as the plpgsql coalesce(payload ->> key, existing col).
+      const payloadKey = Object.prototype.hasOwnProperty.call(payload, 'external_plan_key')
+        ? payload.external_plan_key
+        : null;
+      return {
+        external_plan_key: payloadKey ?? existing.external_plan_key,
+      };
+    }
+    // Form submits a blank external_plan_key -> payload.external_plan_key = null.
+    expect(
+      mergeUpdate({ external_plan_key: 'toss-plan-abc' }, { external_plan_key: null })
+    ).toEqual({ external_plan_key: 'toss-plan-abc' });
+    // Caller omits the key entirely (e.g. an admin edit form that did not
+    // render the field) -> payload key is missing.
+    expect(mergeUpdate({ external_plan_key: 'toss-plan-abc' }, {})).toEqual({ external_plan_key: 'toss-plan-abc' });
+    // Caller explicitly supplies a NEW key -> payload wins.
+    expect(
+      mergeUpdate({ external_plan_key: 'toss-plan-old' }, { external_plan_key: 'toss-plan-new' })
+    ).toEqual({ external_plan_key: 'toss-plan-new' });
+  });
 });

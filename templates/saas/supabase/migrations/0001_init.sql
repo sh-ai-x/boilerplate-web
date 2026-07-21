@@ -162,7 +162,15 @@ begin
        set name              = payload ->> 'name',
            price_cents       = (payload ->> 'price_cents')::int,
            interval          = payload ->> 'interval',
-           external_plan_key = payload ->> 'external_plan_key',
+           -- A04/A09: preserve external_plan_key if the caller did not
+           -- supply it. The admin edit form does not pre-fill the field
+           -- (single combined add/update form keyed only by an `id`
+           -- input), so a blank submit would otherwise overwrite an
+           -- existing Toss plan key with NULL -- silently breaking
+           -- every subscriber on that plan the next time billing runs.
+           -- coalesce(payload key, existing column) keeps the prior
+           -- value when the JSON payload's key is missing or null.
+           external_plan_key = coalesce(payload ->> 'external_plan_key', external_plan_key),
            updated_at        = now()
      where id = plan_id_in;
   else
