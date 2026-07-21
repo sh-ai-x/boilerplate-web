@@ -213,6 +213,16 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
   });
 });
 
+describe('A15 — README table list matches the migration', () => {
+  it('lists plans / subscriptions / audit_log and does NOT claim a payments table', () => {
+    // 0001_init.sql creates exactly plans, subscriptions, audit_log — no
+    // `payments` table. A README that promises one is a misleading smoke-test
+    // signal (any code referencing public.payments fails at runtime).
+    expect(SAAS_README).toMatch(/`plans`,\s*`subscriptions`,\s*and\s*`audit_log`/);
+    expect(SAAS_README).not.toMatch(/`payments`/);
+  });
+});
+
 describe('A14 — admin page tolerates missing env (no 500 on fresh boot)', () => {
   it('validates supabase env BEFORE createServerClient and redirects when unset', () => {
     expect(PLANS_PAGE).toMatch(/NEXT_PUBLIC_SUPABASE_URL/);
