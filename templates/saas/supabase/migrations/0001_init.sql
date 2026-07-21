@@ -79,45 +79,43 @@ alter table public.audit_log enable row level security;
 
 
 -- ---------------------------------------------------------------------------
--- claim_toss_billing_key_cleanup() — A04 atomic CAS for billing-key cleanup.
+-- claim_toss_billing_key_cleanup() — A04 existence check for billing-key cleanup.
 --
--- Called by the Edge Function after a failed subscriptions INSERT. Returns
--- TRUE if THIS function's billing_key is still referenced in subscriptions
--- (a concurrent request won the race, so the Toss key must NOT be deleted —
--- it is the winner's key). Returns FALSE if no row has this billing_key
--- (the orphan is safe to delete from Toss).
+-- Called by the Edge Function after a failed subscriptions INSERT.
+--   returns TRUE  => some row in public.subscriptions holds THIS billing_key
+--                    (a concurrent request won the race and inserted first;
+--                    the Toss key is the winner's, so do NOT delete it).
+--   returns FALSE => no row holds this billing_key (the Toss key is an orphan
+--                    and is safe to delete).
 --
--- p_active_subscription_id is the id of the subscription the caller just
--- inserted (the winning one). Passing it makes the WHERE clause exclude that
--- row, so a loser's cleanup call can NEVER mark the winner's active
--- subscription abandoned — the loser only abandons rows that have a
--- DIFFERENT id (i.e. its own stale attempt, never the winner's).
+-- This is a READ-ONLY existence check, not a destructive UPDATE. The previous
+-- implementation did an UPDATE marking rows abandoned, which had two defects:
+--   1) In the winner-exists race (Scenario A in the A04 regression test) the
+--      WHERE clause `id is distinct from p_active_subscription_id` excluded
+--      the winner's row, so the UPDATE matched ZERO rows, returning v_id IS
+--      NULL => FALSE. The Edge Function then DELETED the Toss key the winner
+--      still depends on — exactly the bug we are trying to prevent.
+--   2) When p_active_subscription_id was NULL, the WHERE clause could mark
+--      another user's row abandoned as a side effect (data corruption).
 --
--- SECURITY DEFINER + locked search_path so the Edge Function can call it via
--- the service-role client without granting the anon role any extra privileges.
+-- p_active_subscription_id is kept on the signature so existing callers do
+-- not break, but it is intentionally unused by the new implementation.
 -- ---------------------------------------------------------------------------
 create or replace function public.claim_toss_billing_key_cleanup(
   p_billing_key text,
   p_active_subscription_id uuid
 )
 returns boolean
-language plpgsql
+language sql
 security definer
+stable
 set search_path = ''
 as $$
-declare
-  v_id uuid;
-begin
-  update public.subscriptions
-     set status = 'abandoned', updated_at = now()
-   where billing_key = p_billing_key
-     and id is distinct from p_active_subscription_id
-   returning id into v_id;
-
-  -- true  => our key is in the DB; do NOT delete (winner depends on it).
-  -- false => no row has our key; safe to delete from Toss.
-  return v_id is not null;
-end;
+  select exists (
+    select 1
+    from public.subscriptions
+    where billing_key = p_billing_key
+  );
 $$;
 
 revoke all on function public.claim_toss_billing_key_cleanup(text, uuid) from public;

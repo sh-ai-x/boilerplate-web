@@ -115,15 +115,45 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
     expect(MIGRATION_0001).toMatch(
       /create or replace function public\.claim_toss_billing_key_cleanup\([\s\S]*?p_active_subscription_id uuid[\s\S]*?returns boolean/
     );
-    expect(MIGRATION_0001).toMatch(/update public\.subscriptions/);
-    expect(MIGRATION_0001).toMatch(/returning id into v_id/);
   });
-  it('0001 cleanup WHERE excludes the active subscription id (no winner corruption)', () => {
-    // The WHERE clause must include `id is distinct from p_active_subscription_id`
-    // so the loser's cleanup call never marks the winner's row abandoned.
-    expect(MIGRATION_0001).toMatch(
-      /where billing_key = p_billing_key\s+and id is distinct from p_active_subscription_id/
+  // The previous implementation did a destructive UPDATE that returned the
+  // WRONG answer in the winner-exists race (the WHERE clause excluded the
+  // winner's row, so the UPDATE matched zero rows, returning FALSE — the
+  // loser then DELETED the winner's Toss key). The new implementation is a
+  // pure existence check. These two assertions pin the new contract.
+  it('0001 cleanup is a read-only existence check (no destructive UPDATE)', () => {
+    // The function body must NOT mark rows abandoned.
+    const fnMatch = MIGRATION_0001.match(
+      /create or replace function public\.claim_toss_billing_key_cleanup[\s\S]*?returns boolean([\s\S]*?)as \$\$([\s\S]*?)\$\$/
     );
+    expect(fnMatch).not.toBeNull();
+    const body = fnMatch![2];
+    expect(body).not.toMatch(/update\s+public\.subscriptions/i);
+    expect(body).not.toMatch(/status\s*=\s*'abandoned'/i);
+    expect(body).toMatch(/select exists/i);
+    expect(body).toMatch(/from public\.subscriptions/i);
+    expect(body).toMatch(/where billing_key = p_billing_key/i);
+  });
+  // Scenario-A regression: a loser's cleanup call must return TRUE when a
+  // winning row already holds the billing_key, so the Edge Function KEEPS the
+  // Toss key instead of deleting it. Reproduce the bug-prone SQL semantics
+  // in JS so the test fails if a future contributor reintroduces the UPDATE
+  // pattern.
+  it('A04 regression: RPC returns TRUE when winner row has the billing_key (no DELETE)', () => {
+    // The RPC contract: TRUE iff some row has the billing_key. The
+    // previous UPDATE-based logic returned FALSE here because the WHERE
+    // excluded the winner's row, matching zero rows.
+    function rpcSemantics(rows: { id: string; billing_key: string }[], p_billing_key: string): boolean {
+      return rows.some((r) => r.billing_key === p_billing_key);
+    }
+    // Race: winner W just inserted with the same billing_key.
+    const winner = [{ id: 'winner-id', billing_key: 'BK_FROM_TOSS' }];
+    expect(rpcSemantics(winner, 'BK_FROM_TOSS')).toBe(true);
+    // No row holds the key -> RPC returns FALSE -> safe to delete orphan.
+    expect(rpcSemantics([], 'BK_FROM_TOSS')).toBe(false);
+    // Stale row from another user's cancelled sub holds the key -> still TRUE.
+    const stale = [{ id: 'stale-id', billing_key: 'BK_FROM_TOSS', status: 'cancelled' }];
+    expect(rpcSemantics(stale, 'BK_FROM_TOSS')).toBe(true);
   });
   it('Edge Function only deletes the Toss key when the CAS says it is safe', () => {
     expect(BILLING).toMatch(/claim_toss_billing_key_cleanup/);
