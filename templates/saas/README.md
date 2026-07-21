@@ -32,8 +32,13 @@ where email = 'you@example.com';
 - Put the site key in `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, the secret in `TURNSTILE_SECRET_KEY`.
 
 ## Toss billing-key
-- Get `TOSS_SECRET_KEY` and `TOSS_AUTH_KEY` from the Toss Payments dashboard.
-- For each plan, copy the Toss-side plan key into the `plans.toss_plan_key` column.
+- Get `TOSS_SECRET_KEY` from the Toss Payments dashboard. The Edge Function
+  uses it as the HTTP Basic credential — `base64(TOSS_SECRET_KEY + ":")`.
+- The per-request `auth_key` is the single-use card-auth token the client
+  obtains from the Toss widget and sends in the request body; it is not an
+  environment variable.
+- For each plan, copy the Toss-side plan key into the `plans.external_plan_key`
+  column.
 - The Edge Function does the `billing/authorizations/issue` confirm and stores
   the resulting `billing_key` in `subscriptions.billing_key`.
 

@@ -213,6 +213,17 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
   });
 });
 
+describe('A17 — README Toss section matches the schema + Edge Function', () => {
+  it('uses external_plan_key (the real column), never toss_plan_key', () => {
+    // Migration line 20, Edge Function, and admin form all use external_plan_key.
+    expect(SAAS_README).not.toMatch(/toss_plan_key/);
+    expect(SAAS_README).toMatch(/external_plan_key/);
+  });
+  it('does not document a TOSS_AUTH_KEY env var (auth_key is a per-request body token)', () => {
+    expect(SAAS_README).not.toMatch(/TOSS_AUTH_KEY/);
+  });
+});
+
 describe('A16 — README does not promise seed plans the migration never inserts', () => {
   it('drops the "three starter plans" seed claim (0001 has no INSERT INTO plans)', () => {
     // The only insert in 0001 is inside upsert_plan_with_audit (a function,
