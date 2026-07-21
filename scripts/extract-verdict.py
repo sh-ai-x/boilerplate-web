@@ -3,37 +3,38 @@
 extract-verdict.py — extract the LLM review/security verdict from
 anthropics/claude-code-action@v1's output file.
 
-ROOT-CAUSE FIX: the previous post-script extracted the verdict by grepping
-PR comments for "Verdict: <value>". That works ONLY when the agent
-actually posts a comment with a "Verdict:" line. When the agent posts an
-inline comment (mcp__github_inline_comment) or no comment at all, the
-post-script falls back to a stale comment from a previous run, causing
-the severity gate to flip-flop between Approve / Changes Requested /
-Blocked on every push.
+ROOT-CAUSE FIX HISTORY:
+  1. (commit 29b0e49) the previous post-script extracted the verdict by
+     grepping PR comments for "Verdict: <value>". That works ONLY when
+     the agent actually posts a comment with a "Verdict:" line. When the
+     agent posts an inline comment (mcp__github_inline_comment) or no
+     comment at all, the post-script falls back to a stale comment from
+     a previous run, causing the severity gate to flip-flop.
+  2. (commit 899c16b) anthropics/claude-code-action@v1's
+     writeExecutionFile does `JSON.stringify(messages, null, 2)` — a
+     pretty-printed JSON array. Treating the file as JSON-lines made
+     every opening-brace line fail to parse, so the script silently
+     returned '' for every run, and the gate defaulted to Approve
+     despite a real Blocked.
+  3. (this commit) The agent posts its verdict via a tool_use
+     (Bash(gh pr comment:*) or mcp__github_*_comment). The Verdict
+     string lives in the tool_use input.body or input.command field,
+     NOT in an assistant text block. The file parser only looked at
+     text blocks, so it always returned empty for tool_use-based
+     verdicts.
 
-This script reads the agent's full output (saved by the action to
-/home/runner/work/_temp/claude-execution-output.json or
-$RUNNER_TEMP/claude-execution-output.json) and extracts the LAST
-"Verdict: <value>" from ANY of these locations:
-  1. assistant message text blocks (the prompt contract)
-  2. assistant tool_use input fields (when the agent posts the comment
-     via Bash(gh pr comment:*) or mcp__github_inline_comment, the
-     Verdict is in the tool_use input.body string, NOT in a text block)
-  3. tool_result output content (the response from the tool call)
-  4. result message output (the final result of the action)
-
-The action's output is a JSON-lines stream of messages (init, user,
-assistant, result, etc.). The assistant messages contain the model's
-text output; the verdict may appear in a text block, a tool_use input,
-or a tool_result output depending on how the agent chose to post it.
+This script now:
+  1. Parses the file as a pretty-printed JSON array (with NDJSON
+     fallback for backward compat with older action versions).
+  2. Walks every assistant message, tool_use input field, tool_result
+     output, and result message output.
+  3. Extracts the LAST `Verdict: <value>` line from any of these
+     locations.
 
 Robustness:
 - If the file is missing, exits 0 with no output (caller falls back).
-- If the file is HTML (e.g. 404 from a redirect), exits 0 with no output
-  (caller falls back). Detected by checking the first non-blank
-  character.
+- If the file is HTML (e.g. 404 from a redirect), exits 0 with no output.
 - If the file is JSON but has no Verdict, exits 0 with no output.
-- If the file is unreadable, exits 0 with no output (caller falls back).
 - Returns exit 0 (not 1) on "not found" so the bash || true at the
   call site can be simplified.
 
@@ -53,7 +54,8 @@ VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
 
 
 def _collect_texts_from_content(content) -> list[str]:
-    """Pull all text fragments out of an assistant `content` field.
+    """Pull all text fragments out of an assistant `content` field, a
+    tool_result's content, or any other list-of-content-blocks.
 
     Handles three shapes:
       - list of content blocks (claude-code SDK): each block may be
@@ -101,38 +103,28 @@ def _collect_texts_from_content(content) -> list[str]:
 
 
 def _collect_texts_from_msg(msg: dict) -> list[str]:
-    """Return all text fragments from a single message, regardless of
-    the message type. Looks at assistant messages' content blocks, at
-    standalone tool_result messages (the response from a tool call
-    can be a top-level message or nested in an assistant message), and
-    at the final `result` message which sometimes carries the last
-    assistant text.
+    """Return all text fragments from a single message. Looks at
+    assistant messages' content blocks, at standalone tool_result
+    messages (the response from a tool call can be a top-level
+    message or nested in an assistant message), and at the final
+    `result` message which sometimes carries the last assistant text.
     """
     if not isinstance(msg, dict):
         return []
     texts: list[str] = []
     mtype = msg.get("type")
-    # assistant messages: content in message.content (SDK) or content (some wrappers)
     if mtype == "assistant":
         content = msg.get("message", {}).get("content")
         if content is None:
             content = msg.get("content")
         texts.extend(_collect_texts_from_content(content))
-    # standalone tool_result messages: the action emits one of these per
-    # tool call. Its content list holds the tool's response, which may
-    # include a text block that echoes the Verdict (e.g. when the tool
-    # response stringifies the posted comment body).
     elif mtype == "tool_result":
         texts.extend(_collect_texts_from_content(msg.get("content")))
-    # result messages: the action's final result. The Verdict may be
-    # echoed in the result text.
     elif mtype == "result":
         result = msg.get("result")
         if isinstance(result, str):
             texts.append(result)
         elif isinstance(result, dict):
-            # The result may contain a `content` field with the final
-            # assistant text.
             for key in ("content", "text", "output"):
                 v = result.get(key)
                 if isinstance(v, str):
@@ -146,6 +138,42 @@ def _collect_texts_from_msg(msg: dict) -> list[str]:
     return texts
 
 
+def _iter_messages_from_text(text: str):
+    """Yield each message object from the file, regardless of format.
+
+    Supports two formats produced by anthropics/claude-code-action@v1:
+      1. Pretty-printed JSON array (current): the action saves
+         `JSON.stringify(messages, null, 2)` — a single JSON array of
+         message objects, pretty-printed with each field on its own
+         line.
+      2. NDJSON / JSON-lines (older versions, some wrappers): one
+         JSON object per line.
+
+    The pretty-printed array starts with `[` (possibly preceded by
+    whitespace); the NDJSON format starts directly with `{`.
+    """
+    stripped = text.lstrip()
+    if stripped.startswith("["):
+        # Format 1: JSON array. Use json.loads on the whole text.
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return
+        if isinstance(data, list):
+            for m in data:
+                yield m
+        return
+    # Format 2: NDJSON. Each non-empty line that starts with `{`.
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            yield json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+
 def extract(path: Path) -> str:
     if not path.exists():
         return ""
@@ -154,29 +182,14 @@ def extract(path: Path) -> str:
     except OSError:
         return ""
     # Bail early if the file looks like an HTML error page (network
-    # failure, 404, etc.). JSON-lines from claude-code-action NEVER
-    # starts with '<'. The 1KB peek is enough to detect any HTML/XML
-    # payload.
+    # failure, 404, etc.).
     peek = text.lstrip()[:1024]
     if peek.startswith("<") or peek.lower().startswith("<?xml"):
         return ""
-    # Also bail if the file is suspiciously small or empty.
     if len(text) < 10:
         return ""
     last_verdict = ""
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        # Bail on any non-{ line — JSON-lines is strict.
-        if not line.startswith("{"):
-            continue
-        try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(msg, dict):
-            continue
+    for msg in _iter_messages_from_text(text):
         for t in _collect_texts_from_msg(msg):
             m = VERDICT_RE.search(t)
             if m:
@@ -190,8 +203,6 @@ def main() -> int:
         return 2
     path = Path(sys.argv[1])
     verdict = extract(path)
-    # ALWAYS print to stdout (empty if not found). Caller uses stdout
-    # to decide whether to use the file verdict or fall back.
     if verdict:
         print(verdict)
     return 0
