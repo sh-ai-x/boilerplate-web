@@ -297,6 +297,77 @@ class TestExtractVerdict(unittest.TestCase):
         )
         self.assertEqual(_run_parser(path), "")
 
+    # --- the pretty-printed JSON array format (commit 899c16b) -------
+    # This is what anthropics/claude-code-action@v1 actually writes:
+    # `JSON.stringify(messages, null, 2)`. Treating this as JSON-lines
+    # fails because each line is a partial JSON object.
+
+    def test_pretty_printed_json_array_with_blocked(self) -> None:
+        # Match the exact shape that triggered the PR #26 false-positive.
+        msgs = [
+            {"type": "system", "subtype": "init", "model": "MiniMax-M3[1m]"},
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "I will run the security review now."},
+                    ],
+                },
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Verdict: Blocked\n\nSecurity summary...",
+                        },
+                    ],
+                },
+            },
+        ]
+        path = self._write(self.tmp / "pretty.json", json.dumps(msgs, indent=2))
+        self.assertEqual(_run_parser(path), "Blocked")
+
+    def test_pretty_printed_json_array_with_approve(self) -> None:
+        msgs = [
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Verdict: Approve"}],
+                },
+            },
+        ]
+        path = self._write(self.tmp / "pretty-approve.json", json.dumps(msgs, indent=2))
+        self.assertEqual(_run_parser(path), "Approve")
+
+    def test_pretty_printed_json_array_with_tool_use(self) -> None:
+        # The critical case: pretty-printed array where the verdict is
+        # in a tool_use input.command, NOT in a text block.
+        msgs = [
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Bash",
+                            "input": {
+                                "command": "gh pr comment 29 --body $'Verdict: Blocked\\n\\nDetails.'"
+                            },
+                        }
+                    ],
+                },
+            },
+        ]
+        path = self.tmp / "pretty-tool-use.json"
+        path.write_text(json.dumps(msgs, indent=2), encoding="utf-8")
+        self.assertEqual(_run_parser(path), "Blocked")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
