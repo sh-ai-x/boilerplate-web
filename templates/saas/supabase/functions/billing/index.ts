@@ -192,18 +192,24 @@ async function issueBillingKey(args: {
   }
 }
 
-// A10: best-effort cleanup of an orphaned Toss billing key. Never throws.
+// A10/A19: best-effort cleanup of an orphaned Toss billing key. Never throws,
+// but a non-2xx (401/403/5xx) or a thrown error is logged so an orphaned key
+// that outlives its failure cause is visible in the structured logs.
 async function deleteBillingKey(auth: string, billingKey: string): Promise<void> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TOSS_TIMEOUT_MS);
   try {
-    await fetch(`${TOSS_BILLING_AUTH_URL}/${billingKey}`, {
+    const res = await fetch(`${TOSS_BILLING_AUTH_URL}/${billingKey}`, {
       method: 'DELETE',
       headers: { authorization: auth, 'idempotency-key': crypto.randomUUID() },
       signal: ctrl.signal,
     });
+    if (!res.ok) {
+      logEvent('cleanup_failed', { billing_key: billingKey, status: res.status });
+    }
   } catch (_err) {
     // Cleanup must never throw — the caller is already on the failure path.
+    logEvent('cleanup_failed', { billing_key: billingKey, reason: 'delete_request_failed_or_timeout' });
   } finally {
     clearTimeout(timer);
   }

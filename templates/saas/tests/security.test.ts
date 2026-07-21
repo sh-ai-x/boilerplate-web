@@ -392,6 +392,20 @@ describe('A09 — logging / audit trail', () => {
   });
 });
 
+describe('A19 — deleteBillingKey surfaces cleanup failures', () => {
+  it('checks res.ok and logs cleanup_failed with the HTTP status', () => {
+    const fn = BILLING.slice(
+      BILLING.indexOf('async function deleteBillingKey'),
+      BILLING.indexOf('Deno.serve')
+    );
+    expect(fn).toMatch(/res\.ok/);
+    expect(fn).toMatch(/logEvent\('cleanup_failed'/);
+    expect(fn).toMatch(/status: res\.status/);
+    // The helper must still never throw (caller is already on the failure path).
+    expect(fn).toMatch(/catch \(_err\)/);
+  });
+});
+
 describe('A10 — resilience: timeouts, cleanup, narrow catch', () => {
   it('bounds both external fetches with AbortController timeouts', () => {
     expect(BILLING).toMatch(/TURNSTILE_TIMEOUT_MS = 5000/);
