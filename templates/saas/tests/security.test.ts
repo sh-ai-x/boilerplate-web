@@ -213,6 +213,15 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
   });
 });
 
+describe('A16 — README does not promise seed plans the migration never inserts', () => {
+  it('drops the "three starter plans" seed claim (0001 has no INSERT INTO plans)', () => {
+    // The only insert in 0001 is inside upsert_plan_with_audit (a function,
+    // not seed data), so /admin/plans renders empty after `supabase db push`.
+    expect(SAAS_README).not.toMatch(/three starter plans/i);
+    expect(SAAS_README).not.toMatch(/Seed data inserts/i);
+  });
+});
+
 describe('A15 — README table list matches the migration', () => {
   it('lists plans / subscriptions / audit_log and does NOT claim a payments table', () => {
     // 0001_init.sql creates exactly plans, subscriptions, audit_log — no

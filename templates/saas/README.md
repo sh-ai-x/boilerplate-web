@@ -17,8 +17,9 @@ Subscription-billing SaaS built on the `@boilerplate-web/shared` infra.
 
 ## Supabase setup
 After `supabase link`, run `supabase db push` to create the `plans`,
-`subscriptions`, and `audit_log` tables + RLS policies. Seed data inserts
-three starter plans (Starter / Pro / Business) in KRW.
+`subscriptions`, and `audit_log` tables + RLS policies. There is no seed
+data — create your subscription tiers from the `/admin/plans` page (they are
+written via `upsert_plan_with_audit`) once the first admin user exists.
 
 The first admin user is created manually:
 ```sql
