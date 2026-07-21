@@ -213,6 +213,16 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
   });
 });
 
+describe('A18 — README admin invariant matches 0002_audit_log.sql', () => {
+  it('documents auth.app_role() = admin (app_metadata.role), not top-level auth.jwt()->>role', () => {
+    // 0002 defines auth.app_role() reading app_metadata.role and the policy
+    // uses it. The README's admin-setup SQL writes raw_app_meta_data, so the
+    // top-level auth.jwt()->>'role' invariant would silently deny admins.
+    expect(SAAS_README).not.toMatch(/auth\.jwt\(\)\s*->>\s*'role'/);
+    expect(SAAS_README).toMatch(/auth\.app_role\(\)\s*=\s*'admin'/);
+  });
+});
+
 describe('A17 — README Toss section matches the schema + Edge Function', () => {
   it('uses external_plan_key (the real column), never toss_plan_key', () => {
     // Migration line 20, Edge Function, and admin form all use external_plan_key.

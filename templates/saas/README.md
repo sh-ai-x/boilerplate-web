@@ -48,7 +48,9 @@ where email = 'you@example.com';
 - **No client-supplied amount.** The pricing page sends `{ plan_id,
   customer_key, turnstile_token }` only; price is fetched from `plans` in
   the Edge Function.
-- **Admin pages are server-gated** by `auth.jwt() ->> 'role' = 'admin'`.
+- **Admin pages are server-gated** by `auth.app_role() = 'admin'` (defined in
+  `0002_audit_log.sql`, reading `app_metadata.role` — the same claim the
+  admin-setup SQL above writes to `raw_app_meta_data`).
 
 ## Dependency reproducibility (A03)
 This package is a member of the pnpm workspace. Its dependency versions are
