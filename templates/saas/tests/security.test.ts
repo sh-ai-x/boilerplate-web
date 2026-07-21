@@ -317,3 +317,30 @@ describe('A10 — resilience: timeouts, cleanup, narrow catch', () => {
     expect(LAYOUT).toMatch(/console\.error/);
   });
 });
+describe('A01/A09 — README matches the actual schema', () => {
+  it('README documents plans + subscriptions + audit_log (no phantom payments table)', () => {
+    expect(SAAS_README).toMatch(/plans/);
+    expect(SAAS_README).toMatch(/subscriptions/);
+    expect(SAAS_README).toMatch(/audit_log/);
+    expect(SAAS_README).not.toMatch(/\bpayments\b\s+tables?/);
+  });
+  it('README does not promise seed data the migration never inserts', () => {
+    expect(SAAS_README).not.toMatch(/Seed data inserts/);
+    expect(SAAS_README).not.toMatch(/Starter\s*\/\s*Pro\s*\/\s*Business/);
+  });
+  it('README column name is external_plan_key (matches migration)', () => {
+    expect(SAAS_README).toMatch(/plans\.external_plan_key/);
+    expect(SAAS_README).not.toMatch(/plans\.toss_plan_key/);
+  });
+  it('README admin invariant uses auth.app_role() (matches 0002 migration)', () => {
+    expect(SAAS_README).toMatch(/auth\.app_role\(\)/);
+    const codeOnly = SAAS_README.replace(/`[^`]*`/g, '').replace(/^>.*$/gm, '');
+    expect(codeOnly).not.toMatch(/admin pages are server-gated.*auth\.jwt\(\)\s*->>\s*'role'/i);
+  });
+  it('README notes that Toss Basic auth uses just the secret key', () => {
+    expect(SAAS_README).not.toMatch(/TOSS_AUTH_KEY/);
+  });
+  it('README has no leftover CI retrigger comment trailers', () => {
+    expect(SAAS_README).not.toMatch(/^#\s*20\d\d-\d\d-\d\d.*CI retrigger/m);
+  });
+});

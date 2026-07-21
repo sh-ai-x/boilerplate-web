@@ -11,14 +11,16 @@ Subscription-billing SaaS built on the `@boilerplate-web/shared` infra.
 ## Local setup
 1. `cp .env.example .env.local` and fill in the values.
 2. `supabase link --project-ref <YOUR_REF>`
-3. `supabase db push` — applies `supabase/migrations/0001_init.sql`.
+3. `supabase db push` — applies `supabase/migrations/0001_init.sql` and
+   `supabase/migrations/0002_audit_log.sql` in lexicographic order.
 4. `supabase functions deploy billing` — deploys the Edge Function.
 5. `pnpm install && pnpm dev` — Next.js dev server on :3000.
 
 ## Supabase setup
 After `supabase link`, run `supabase db push` to create the `plans`,
-`subscriptions`, and `payments` tables + RLS policies. Seed data inserts
-three starter plans (Starter / Pro / Business) in KRW.
+`subscriptions`, and `audit_log` tables + RLS policies. The migration
+files do NOT seed any starter plans; add plans from the admin UI at
+`/admin/plans` once Supabase Auth has an admin user.
 
 The first admin user is created manually:
 ```sql
@@ -26,13 +28,24 @@ update auth.users set raw_app_meta_data = raw_app_meta_data || '{"role":"admin"}
 where email = 'you@example.com';
 ```
 
+The admin role is read by RLS policies through the SECURITY DEFINER
+helper `auth.app_role()` (declared in `0002_audit_log.sql`), which
+reads `auth.jwt() -> 'app_metadata' ->> 'role'`. The top-level
+`auth.jwt() ->> 'role'` is the PostgREST role and is NOT used for
+admin gating.
+
 ## Cloudflare Turnstile
 - Create a site key + secret key at <https://dash.cloudflare.com/?to=/:account/turnstile>.
 - Put the site key in `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, the secret in `TURNSTILE_SECRET_KEY`.
 
 ## Toss billing-key
-- Get `TOSS_SECRET_KEY` and `TOSS_AUTH_KEY` from the Toss Payments dashboard.
-- For each plan, copy the Toss-side plan key into the `plans.toss_plan_key` column.
+- Get `TOSS_SECRET_KEY` from the Toss Payments dashboard. The Toss API
+  authenticates with HTTP Basic auth `Basic base64(secretKey:)` — note
+  the trailing colon — so only the secret key is required.
+- For each plan, copy the Toss-side plan key into the
+  `plans.external_plan_key` column. The column is nullable; the
+  billing Edge Function rejects requests with `plan_missing_external_key`
+  before any Toss call if it is null/empty.
 - The Edge Function does the `billing/authorizations/issue` confirm and stores
   the resulting `billing_key` in `subscriptions.billing_key`.
 
@@ -42,7 +55,7 @@ where email = 'you@example.com';
 - **No client-supplied amount.** The pricing page sends `{ plan_id,
   customer_key, turnstile_token }` only; price is fetched from `plans` in
   the Edge Function.
-- **Admin pages are server-gated** by `auth.jwt() ->> 'role' = 'admin'`.
+- **Admin pages are server-gated** by `auth.app_role() = 'admin'`.
 
 ## Dependency reproducibility (A03)
 This package is a member of the pnpm workspace. Its dependency versions are
@@ -51,5 +64,3 @@ per-package lockfile inside a workspace. CI installs with
 `pnpm install --frozen-lockfile`, so builds are byte-for-byte reproducible.
 When the template is scaffolded standalone, run `pnpm install` once to
 generate a project-local `pnpm-lock.yaml` and commit it.
-# 2026-07-21T18:06:54+09:00 CI retrigger
-# 2026-07-21T18:58:13+09:00 CI retrigger
