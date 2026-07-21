@@ -93,6 +93,24 @@ describe('A02 — anti-framing / security headers', () => {
     expect(NEXT_CONFIG).toMatch(/Referrer-Policy/);
     expect(NEXT_CONFIG).toMatch(/X-Content-Type-Options.*nosniff/s);
   });
+  it('enforces HTTPS via Strict-Transport-Security (A02)', () => {
+    // Without HSTS, a network attacker can downgrade the first request to
+    // HTTP and steal the session cookie. max-age=31536000 is one year;
+    // includeSubDomains prevents subdomain bypass.
+    expect(NEXT_CONFIG).toMatch(
+      /Strict-Transport-Security.*max-age=31536000.*includeSubDomains/s
+    );
+  });
+  it('denies legacy cross-domain policies (A02)', () => {
+    expect(NEXT_CONFIG).toMatch(/X-Permitted-Cross-Domain-Policies.*none/s);
+  });
+  it('disables unused browser features via Permissions-Policy (A02)', () => {
+    expect(NEXT_CONFIG).toMatch(/Permissions-Policy/);
+    expect(NEXT_CONFIG).toMatch(/camera=\(\)/);
+    expect(NEXT_CONFIG).toMatch(/microphone=\(\)/);
+    expect(NEXT_CONFIG).toMatch(/geolocation=\(\)/);
+    expect(NEXT_CONFIG).toMatch(/interest-cohort=\(\)/);
+  });
 });
 
 describe('A03 — dependency integrity', () => {
