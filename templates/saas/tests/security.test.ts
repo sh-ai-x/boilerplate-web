@@ -434,4 +434,32 @@ describe('A01/A09 — README matches the actual schema', () => {
     // No expectations configured: legacy behavior (success-only) preserved.
     expect(verify({ success: true, hostname: 'anything', action: 'login' })).toBe(true);
   });
+});describe('A01 — admin page guards missing env vars', () => {
+  it('getSupabaseForRequest validates NEXT_PUBLIC_SUPABASE_URL is non-empty', () => {
+    expect(PLANS_PAGE).toMatch(/readEnv\(['"]NEXT_PUBLIC_SUPABASE_URL['"]\)/);
+  });
+  it('getSupabaseForRequest validates NEXT_PUBLIC_SUPABASE_ANON_KEY is non-empty', () => {
+    expect(PLANS_PAGE).toMatch(/readEnv\(['"]NEXT_PUBLIC_SUPABASE_ANON_KEY['"]\)/);
+  });
+  it('readEnv throws Missing required env: <key> on empty values', () => {
+    expect(PLANS_PAGE).toMatch(/Missing required env: /);
+  });
+  it('createServerClient is never called with empty strings', () => {
+    // Regression: previously the code passed `?? ''` into createServerClient,
+    // which produced a generic 500 on misconfiguration. After the fix, every
+    // env value reaches createServerClient via readEnv, which throws first.
+    const admin = PLANS_PAGE.slice(PLANS_PAGE.indexOf('function getSupabaseForRequest'));
+    expect(admin).not.toMatch(/createServerClient\(\s*\n?\s*process\.env\.NEXT_PUBLIC_SUPABASE_URL\s*\?\?\s*''/);
+    expect(admin).not.toMatch(/createServerClient\(\s*\n?\s*''\s*,/);
+  });
+  it('readEnv JS semantics: empty string raises a clean error', () => {
+    function readEnv(key: string, value: string | undefined): string {
+      const v = value ?? '';
+      if (!v) throw new Error(`Missing required env: ${key}. Copy .env.example to .env.local and fill it in.`);
+      return v;
+    }
+    expect(() => readEnv('NEXT_PUBLIC_SUPABASE_URL', '')).toThrow(/Missing required env: NEXT_PUBLIC_SUPABASE_URL/);
+    expect(() => readEnv('NEXT_PUBLIC_SUPABASE_URL', undefined)).toThrow(/Missing required env: NEXT_PUBLIC_SUPABASE_URL/);
+    expect(readEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://x.supabase.co')).toBe('https://x.supabase.co');
+  });
 });
