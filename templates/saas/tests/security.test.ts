@@ -213,6 +213,19 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
   });
 });
 
+describe('A14 — admin page tolerates missing env (no 500 on fresh boot)', () => {
+  it('validates supabase env BEFORE createServerClient and redirects when unset', () => {
+    expect(PLANS_PAGE).toMatch(/NEXT_PUBLIC_SUPABASE_URL/);
+    expect(PLANS_PAGE).toMatch(/NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+    // The guard must short-circuit to the unauthenticated path before the
+    // @supabase/ssr client (which throws synchronously on empty url) is built.
+    expect(PLANS_PAGE).toMatch(/if \(!url \|\| !anon\) redirect\('\/'\)/);
+    // The old empty-string fallback that fed createServerClient('','') is gone.
+    expect(PLANS_PAGE).not.toMatch(/NEXT_PUBLIC_SUPABASE_URL \?\? ''/);
+    expect(PLANS_PAGE).not.toMatch(/NEXT_PUBLIC_SUPABASE_ANON_KEY \?\? ''/);
+  });
+});
+
 describe('A13 — RootLayout uses a cookie-backed @supabase/ssr client', () => {
   it('imports createServerClient from @supabase/ssr (not the bare shared helper)', () => {
     expect(LAYOUT).toMatch(/from '@supabase\/ssr'/);

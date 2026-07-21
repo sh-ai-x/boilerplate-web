@@ -19,10 +19,19 @@ interface Plan {
 // @supabase/ssr createServerClient is what actually threads the request's auth
 // cookie into Supabase auth storage.
 function getSupabaseForRequest() {
+  // A14: @supabase/ssr's createServerClient throws "supabaseUrl is required"
+  // synchronously when url/anon are empty, which 500s the entire /admin/plans
+  // page on a first-boot / fresh `cp .env.example .env.local`. Validate env
+  // BEFORE constructing the client and short-circuit to the unauthenticated
+  // path (redirect('/'), matching the missing-session branch) instead of
+  // crashing. redirect() throws NEXT_REDIRECT, so nothing below it runs.
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) redirect('/');
   const cookieStore = cookies();
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
+    url,
+    anon,
     {
       cookies: {
         get(name: string) {
