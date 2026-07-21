@@ -213,6 +213,23 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
   });
 });
 
+describe('A13 — RootLayout uses a cookie-backed @supabase/ssr client', () => {
+  it('imports createServerClient from @supabase/ssr (not the bare shared helper)', () => {
+    expect(LAYOUT).toMatch(/from '@supabase\/ssr'/);
+    expect(LAYOUT).toMatch(/createServerClient/);
+    expect(LAYOUT).not.toMatch(/createServerSupabase/);
+  });
+  it('threads next/headers cookies into the client so getUser resolves the session', () => {
+    expect(LAYOUT).toMatch(/const cookieStore = cookies\(\)/);
+    expect(LAYOUT).toMatch(/cookieStore\.get\(name\)/);
+    expect(LAYOUT).toMatch(/auth\.getUser\(\)/);
+  });
+  it('still degrades a missing-env deploy to a logged-out render (not a 500)', () => {
+    expect(LAYOUT).toMatch(/isMissingEnvError/);
+    expect(LAYOUT).toMatch(/console\.error/);
+  });
+});
+
 describe('A12 — Turnstile token is bound to hostname + action', () => {
   it('verifyTurnstile enforces hostname/action against env allow-lists', () => {
     // Defense-in-depth: a token minted under the same site key for a
