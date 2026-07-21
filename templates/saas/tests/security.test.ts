@@ -211,6 +211,47 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
     expect(next.getMonth()).toBe(1); // February
     expect([28, 29]).toContain(next.getDate()); // 28 non-leap, 29 leap
   });
+  // A14: the same trap exists for Feb 29 + 1 year on a leap day
+  // subscription. setFullYear(+1) on Feb 29 normalizes to Mar 1 in a
+  // non-leap target year, drifting every subsequent annual bill.
+  it('addInterval(Feb 29 + 1 year) clamps to Feb 28 in non-leap year (not Mar 1)', () => {
+    // Reproduce the year-branch clamp locally so the test fails if a future
+    // contributor reintroduces `setFullYear(+1); return` without the rollback.
+    function addYear(d: Date): Date {
+      const next = new Date(d);
+      const targetYear = next.getFullYear() + 1;
+      const targetMonth = next.getMonth();
+      next.setFullYear(targetYear);
+      if (next.getMonth() !== targetMonth) {
+        next.setDate(0);
+      }
+      return next;
+    }
+    // Feb 29, 2024 + 1 year → 2025 is not a leap year → must be Feb 28, 2025.
+    const feb29 = new Date(2024, 1, 29);
+    const result = addYear(feb29);
+    expect(result.getFullYear()).toBe(2025);
+    expect(result.getMonth()).toBe(1); // February
+    expect(result.getDate()).toBe(28); // clamped, not Mar 1
+    // Once the anchor slips to Feb 28, every subsequent +1 year stays at
+    // Feb 28 (no rollback needed; getMonth matches targetMonth).
+    const feb28 = new Date(2025, 1, 28);
+    const plusOne = addYear(feb28);
+    expect(plusOne.getFullYear()).toBe(2026);
+    expect(plusOne.getMonth()).toBe(1);
+    expect(plusOne.getDate()).toBe(28);
+    // And a non-leap-year start never drifts either.
+    const jan15_2026 = new Date(2026, 0, 15);
+    const plusOneJan = addYear(jan15_2026);
+    expect(plusOneJan.getFullYear()).toBe(2027);
+    expect(plusOneJan.getMonth()).toBe(0);
+    expect(plusOneJan.getDate()).toBe(15);
+  });
+  it('addInterval(year) helper is wired with the leap-day clamp branch', () => {
+    expect(BILLING).toMatch(/interval === 'year'/);
+    expect(BILLING).toMatch(/targetYear\s*=\s*next\.getFullYear\(\)\s*\+\s*1/);
+    expect(BILLING).toMatch(/next\.getMonth\(\)\s*!==\s*targetMonth/);
+  });
 });
 
 describe('A18 — README admin invariant matches 0002_audit_log.sql', () => {

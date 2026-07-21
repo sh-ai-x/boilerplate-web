@@ -110,10 +110,22 @@ type PlanInterval = 'month' | 'year';
 //   Jan 31 + 1 month -> Feb 28/29 (NOT Mar 3)
 //   May 31 + 1 month -> Jun 30
 //   Jul 31 + 1 month -> Aug 31
+//
+// A14: same trap exists for Feb 29 + 1 year. setFullYear(+1) on a leap day
+// normalizes to Mar 1 in a non-leap year, drifting every subsequent annual
+// bill. Snap to Feb 28 in non-leap target years so the recurrence stays
+// anchored to the last day of February.
 function addInterval(d: Date, interval: PlanInterval): Date {
   const next = new Date(d);
   if (interval === 'year') {
-    next.setFullYear(next.getFullYear() + 1);
+    const targetYear = next.getFullYear() + 1;
+    const targetMonth = next.getMonth();
+    next.setFullYear(targetYear);
+    // If the original date was Feb 29 and the target year is not a leap
+    // year, setFullYear normalizes to Mar 1. Roll back to Feb 28.
+    if (next.getMonth() !== targetMonth) {
+      next.setDate(0);
+    }
     return next;
   }
   const targetMonth = next.getMonth() + 1;
