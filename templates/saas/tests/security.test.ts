@@ -392,6 +392,12 @@ describe('A09 — logging / audit trail', () => {
   });
 });
 
+describe('A22 — README has no committed CI retrigger comments', () => {
+  it('contains no timestamped "# ... CI retrigger" shell comments', () => {
+    expect(SAAS_README).not.toMatch(/CI retrigger/);
+  });
+});
+
 describe('A21 — customer_key body field is ignored, not a required-field oracle', () => {
   it('does not 400 on missing customer_key (provider customerKey is derived from user id)', () => {
     // The handler derives customerKey from the authenticated userId, so a
