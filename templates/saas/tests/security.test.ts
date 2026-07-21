@@ -392,6 +392,18 @@ describe('A09 — logging / audit trail', () => {
   });
 });
 
+describe('A21 — customer_key body field is ignored, not a required-field oracle', () => {
+  it('does not 400 on missing customer_key (provider customerKey is derived from user id)', () => {
+    // The handler derives customerKey from the authenticated userId, so a
+    // required-field 400 on the body field is dead code — a false API contract
+    // and a probe oracle.
+    expect(BILLING).not.toMatch(/'missing customer_key'/);
+    expect(BILLING).not.toMatch(/!customer_key \|\| typeof customer_key/);
+    // customerKey is still bound to the user id.
+    expect(BILLING).toMatch(/const customerKey = userId;/);
+  });
+});
+
 describe('A19 — deleteBillingKey surfaces cleanup failures', () => {
   it('checks res.ok and logs cleanup_failed with the HTTP status', () => {
     const fn = BILLING.slice(

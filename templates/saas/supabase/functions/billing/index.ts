@@ -238,13 +238,14 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'invalid_body' }, 400);
   }
 
-  const { plan_id, customer_key, turnstile_token, auth_key } = body as Partial<BillingRequest>;
+  const { plan_id, turnstile_token, auth_key } = body as Partial<BillingRequest>;
   if (!plan_id || typeof plan_id !== 'string') {
     return jsonResponse({ error: 'missing plan_id' }, 400);
   }
-  if (!customer_key || typeof customer_key !== 'string') {
-    return jsonResponse({ error: 'missing customer_key' }, 400);
-  }
+  // A21: `customer_key` in the body is intentionally NOT validated or read.
+  // The provider customerKey is derived from the authenticated user id below,
+  // so a required-field 400 here would be dead code — a false API contract and
+  // a probe oracle. The field is accepted-but-ignored for schema compatibility.
   if (!turnstile_token || typeof turnstile_token !== 'string') {
     return jsonResponse({ error: 'missing turnstile_token' }, 400);
   }
