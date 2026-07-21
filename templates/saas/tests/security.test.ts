@@ -113,10 +113,17 @@ describe('A03 — committed lockfile', () => {
 describe('A04 — atomic CAS billing-key cleanup', () => {
   it('0001 declares claim_toss_billing_key_cleanup returning boolean', () => {
     expect(MIGRATION_0001).toMatch(
-      /create or replace function public\.claim_toss_billing_key_cleanup\(p_billing_key text\)[\s\S]*returns boolean/
+      /create or replace function public\.claim_toss_billing_key_cleanup\([\s\S]*?p_active_subscription_id uuid[\s\S]*?returns boolean/
     );
     expect(MIGRATION_0001).toMatch(/update public\.subscriptions/);
     expect(MIGRATION_0001).toMatch(/returning id into v_id/);
+  });
+  it('0001 cleanup WHERE excludes the active subscription id (no winner corruption)', () => {
+    // The WHERE clause must include `id is distinct from p_active_subscription_id`
+    // so the loser's cleanup call never marks the winner's row abandoned.
+    expect(MIGRATION_0001).toMatch(
+      /where billing_key = p_billing_key\s+and id is distinct from p_active_subscription_id/
+    );
   });
   it('Edge Function only deletes the Toss key when the CAS says it is safe', () => {
     expect(BILLING).toMatch(/claim_toss_billing_key_cleanup/);
@@ -124,6 +131,10 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
     const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
     expect(insertFail).toMatch(/deleteBillingKey/);
     expect(insertFail).toMatch(/claim_toss_billing_key_cleanup/);
+    // Loser must look up the winner's id and pass it so the cleanup RPC
+    // excludes the winning row from being marked abandoned.
+    expect(insertFail).toMatch(/p_active_subscription_id/);
+    expect(insertFail).toMatch(/\.eq\('billing_key'/);
   });
   it('interval-aware next_bill_at: branches on plan.interval', () => {
     expect(BILLING).toMatch(/plan\.interval === 'year'/);

@@ -87,10 +87,19 @@ alter table public.audit_log enable row level security;
 -- it is the winner's key). Returns FALSE if no row has this billing_key
 -- (the orphan is safe to delete from Toss).
 --
+-- p_active_subscription_id is the id of the subscription the caller just
+-- inserted (the winning one). Passing it makes the WHERE clause exclude that
+-- row, so a loser's cleanup call can NEVER mark the winner's active
+-- subscription abandoned — the loser only abandons rows that have a
+-- DIFFERENT id (i.e. its own stale attempt, never the winner's).
+--
 -- SECURITY DEFINER + locked search_path so the Edge Function can call it via
 -- the service-role client without granting the anon role any extra privileges.
 -- ---------------------------------------------------------------------------
-create or replace function public.claim_toss_billing_key_cleanup(p_billing_key text)
+create or replace function public.claim_toss_billing_key_cleanup(
+  p_billing_key text,
+  p_active_subscription_id uuid
+)
 returns boolean
 language plpgsql
 security definer
@@ -102,6 +111,7 @@ begin
   update public.subscriptions
      set status = 'abandoned', updated_at = now()
    where billing_key = p_billing_key
+     and id is distinct from p_active_subscription_id
    returning id into v_id;
 
   -- true  => our key is in the DB; do NOT delete (winner depends on it).
@@ -110,8 +120,8 @@ begin
 end;
 $$;
 
-revoke all on function public.claim_toss_billing_key_cleanup(text) from public;
-grant execute on function public.claim_toss_billing_key_cleanup(text) to service_role;
+revoke all on function public.claim_toss_billing_key_cleanup(text, uuid) from public;
+grant execute on function public.claim_toss_billing_key_cleanup(text, uuid) to service_role;
 
 
 -- ---------------------------------------------------------------------------

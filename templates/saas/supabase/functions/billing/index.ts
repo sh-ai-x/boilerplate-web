@@ -301,8 +301,19 @@ Deno.serve(async (req: Request) => {
     // row). Atomically check: if our key is referenced, KEEP it on Toss;
     // otherwise it is safe to delete. The check + abandon-mark happen in a
     // single statement so the unique-index loser cannot delete the winner.
+    //
+    // Look up the existing row's id so the cleanup RPC can EXCLUDE that row
+    // from being marked abandoned — otherwise a race could leave the
+    // winner's active subscription marked abandoned while its Toss key is
+    // still in use.
+    const { data: existing } = await supabase
+      .from('subscriptions')
+      .select('id')
+      .eq('billing_key', result.billingKey)
+      .maybeSingle();
     const { data: keepKey } = await supabase.rpc('claim_toss_billing_key_cleanup', {
       p_billing_key: result.billingKey,
+      p_active_subscription_id: existing?.id ?? null,
     });
     if (keepKey !== true) {
       // A10: best-effort delete so an orphaned Toss key is not left dangling.
