@@ -288,9 +288,14 @@ Deno.serve(async (req: Request) => {
   }
 
   // Toss confirm. The amount comes from plan.price_cents (DB), never from request input.
+  // A11: Toss HTTP Basic auth = base64(secretKey + ":") — the secret key is
+  // the username and the password is empty. The per-request `auth_key` (the
+  // client card-auth token, carried in the request BODY) is NOT an HTTP-Basic
+  // credential. The previous code placed a spurious env var in the username
+  // slot, so on a fresh deploy (that var unset) the header collapsed to
+  // btoa(":<secret>") and every Toss call was rejected.
   const tossSecret = Deno.env.get('TOSS_SECRET_KEY') ?? '';
-  const tossAuthKey = Deno.env.get('TOSS_AUTH_KEY') ?? '';
-  const tossAuth = 'Basic ' + btoa(`${tossAuthKey}:${tossSecret}`);
+  const tossAuth = 'Basic ' + btoa(`${tossSecret}:`);
   // A06: deterministic idempotency key => retries are idempotent end-to-end.
   const idempotencyKey = `billing:${userId}:${plan_id}`;
   const result = await issueBillingKey({

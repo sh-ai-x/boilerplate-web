@@ -260,7 +260,15 @@ describe('A07 — Toss billing-key issuance contract', () => {
     expect(body).not.toMatch(/orderId:/);
   });
   it('Authorization is Basic base64(secretKey:)', () => {
-    expect(BILLING).toMatch(/Basic ' \+ btoa\(`\$\{tossAuthKey\}:\$\{tossSecret\}`\)/);
+    // Toss HTTP Basic auth = base64(secretKey + ":") — the secret key is the
+    // username and the password is empty. The per-request Toss `auth_key`
+    // (card-auth token) is a BODY field, never an HTTP-Basic credential.
+    expect(BILLING).toMatch(/Basic ' \+ btoa\(`\$\{tossSecret\}:`\)/);
+    // Regression: the secret must NOT be placed in the password slot behind a
+    // spurious TOSS_AUTH_KEY username (the original bug collapsed to
+    // btoa(':<secret>') on a fresh deploy where TOSS_AUTH_KEY was unset).
+    expect(BILLING).not.toMatch(/btoa\(`\$\{tossAuthKey\}:/);
+    expect(BILLING).not.toMatch(/TOSS_AUTH_KEY/);
   });
   it('Idempotency-Key is stable per (user, plan) — no crypto.randomUUID() on issue', () => {
     const issueFn = BILLING.slice(
