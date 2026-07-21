@@ -154,6 +154,18 @@ describe('A05 — CORS preflight + headers on every response', () => {
     expect(BILLING).toMatch(/req\.method === 'OPTIONS'/);
     expect(BILLING).toMatch(/status: 204/);
   });
+  it('rejects null/empty external_plan_key with plan_missing_external_key BEFORE Toss', () => {
+    // Admin form allows external_plan_key to be NULL. Without this guard the
+    // code would hand null to Toss and surface an opaque provider error.
+    expect(BILLING).toMatch(/plan_missing_external_key/);
+    // The check must happen before issueBillingKey is called.
+    expect(BILLING.indexOf('plan_missing_external_key'))
+      .toBeLessThan(BILLING.indexOf('issueBillingKey({'));
+    // The check must guard the existing call site (not be unreachable).
+    const beforeToss = BILLING.slice(0, BILLING.indexOf('issueBillingKey({'));
+    expect(beforeToss).toMatch(/plan_missing_external_key/);
+    expect(beforeToss).toMatch(/return jsonResponse\(\{ error: 'plan_missing_external_key' \}, 400\)/);
+  });
 });
 
 describe('A06 — no duplicate active subscriptions', () => {

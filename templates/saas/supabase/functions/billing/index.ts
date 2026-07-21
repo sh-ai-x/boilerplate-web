@@ -242,6 +242,14 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'plan_not_found' }, 400);
   }
 
+  // A05: external_plan_key can be NULL (admin form allows it). Without this
+  // check we would hand a null to the Toss contract and surface an opaque
+  // provider error. Reject with a contract-specific 400 BEFORE calling Toss.
+  if (!plan.external_plan_key || typeof plan.external_plan_key !== 'string' || plan.external_plan_key.length === 0) {
+    logEvent('billing_plan_missing_external_key', { user_id: userId, plan_id });
+    return jsonResponse({ error: 'plan_missing_external_key' }, 400);
+  }
+
   // A06: reject if the user already holds an active subscription to this plan,
   // so a retried/duplicated request cannot create two active subscriptions.
   const { data: existing } = await supabase
