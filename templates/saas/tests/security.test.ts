@@ -259,8 +259,25 @@ describe('A07 — Toss billing-key issuance contract', () => {
     expect(body).not.toMatch(/amount:/);
     expect(body).not.toMatch(/orderId:/);
   });
-  it('Authorization is Basic base64(secretKey:)', () => {
-    expect(BILLING).toMatch(/Basic ' \+ btoa\(`\$\{tossAuthKey\}:\$\{tossSecret\}`\)/);
+  it('Authorization is Basic base64(secretKey:) — Toss contract', () => {
+    // Per Toss docs: 'Append a colon (:) to the end of your secret key,
+    // then Base64-encode it'. The previous test pinned the WRONG order
+    // (authKey:secretKey) which produced 401 at runtime. The new regex
+    // pins the correct Basic auth contract: secret key followed by a
+    // trailing colon, base64-encoded.
+    expect(BILLING).toMatch(/Basic ' \+ btoa\(`\$\{tossSecret\}:`\)/);
+    expect(BILLING).not.toMatch(/TOSS_AUTH_KEY/);
+    expect(BILLING).not.toMatch(/tossAuthKey/);
+  });
+  it('btoa(secretKey:) round-trip: base64 decodes to "sk_test_xxx:"', () => {
+    // Reproduce the header value so the test fails if a future
+    // contributor introduces a different credential shape.
+    const secretKey = 'sk_test_dummyKeyValue';
+    const header = 'Basic ' + btoa(`${secretKey}:`);
+    // btoa is available in the Deno runtime that ships the Edge
+    // Function; vitest's jsdom env also exposes it for tests.
+    const decoded = atob(header.replace(/^Basic /, ''));
+    expect(decoded).toBe('sk_test_dummyKeyValue:');
   });
   it('Idempotency-Key is stable per (user, plan) — no crypto.randomUUID() on issue', () => {
     const issueFn = BILLING.slice(

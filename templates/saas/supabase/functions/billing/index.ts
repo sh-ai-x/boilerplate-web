@@ -288,9 +288,15 @@ Deno.serve(async (req: Request) => {
   }
 
   // Toss confirm. The amount comes from plan.price_cents (DB), never from request input.
+  // A07: Toss APIs authenticate with HTTP Basic auth where the
+  // username is the secret key and the password is empty (Toss
+  // docs: 'Append a colon to the end of your secret key, then
+  // base64-encode it for the Authorization header'). The previous
+  // implementation concatenated two env vars into the credential,
+  // which base64-encoded the wrong string and was rejected by Toss
+  // with 401 at request time.
   const tossSecret = Deno.env.get('TOSS_SECRET_KEY') ?? '';
-  const tossAuthKey = Deno.env.get('TOSS_AUTH_KEY') ?? '';
-  const tossAuth = 'Basic ' + btoa(`${tossAuthKey}:${tossSecret}`);
+  const tossAuth = 'Basic ' + btoa(`${tossSecret}:`);
   // A06: deterministic idempotency key => retries are idempotent end-to-end.
   const idempotencyKey = `billing:${userId}:${plan_id}`;
   const result = await issueBillingKey({
