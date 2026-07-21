@@ -60,7 +60,12 @@ function logEvent(event: string, fields: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ event, timestamp: new Date().toISOString(), ...fields }));
 }
 
-async function verifyTurnstile(token: string, secretKey: string): Promise<boolean> {
+async function verifyTurnstile(
+  token: string,
+  secretKey: string,
+  expectedHostname: string,
+  expectedAction: string
+): Promise<boolean> {
   // A10: 5s timeout + top-level catch so a hung Cloudflare call cannot stall us.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TURNSTILE_TIMEOUT_MS);
@@ -72,8 +77,23 @@ async function verifyTurnstile(token: string, secretKey: string): Promise<boolea
       signal: ctrl.signal,
     });
     if (!res.ok) return false;
-    const data = await res.json() as { success?: boolean };
-    return data.success === true;
+    const data = await res.json() as { success?: boolean; hostname?: string; action?: string };
+    if (data.success !== true) return false;
+    // A12: defense-in-depth. Cloudflare's siteverify echoes the hostname the
+    // token was solved on and the widget `action`. A token minted under the
+    // same site key for a different host (dev vs prod) or a different action
+    // must be rejected. The expected values are env-anchored allow-lists; when
+    // a value is unset the corresponding check is skipped (opt-in for the
+    // template) but is enforced the moment an operator sets it.
+    if (expectedHostname && data.hostname !== expectedHostname) {
+      logEvent('turnstile_hostname_mismatch', { expected: expectedHostname, got: data.hostname });
+      return false;
+    }
+    if (expectedAction && data.action !== expectedAction) {
+      logEvent('turnstile_action_mismatch', { expected: expectedAction, got: data.action });
+      return false;
+    }
+    return true;
   } catch (_err) {
     logEvent('turnstile_error', { reason: 'fetch_failed_or_timeout' });
     return false;
@@ -249,7 +269,14 @@ Deno.serve(async (req: Request) => {
   const customerKey = userId;
 
   const turnstileSecret = Deno.env.get('TURNSTILE_SECRET_KEY') ?? '';
-  const turnstileOk = await verifyTurnstile(turnstile_token, turnstileSecret);
+  const turnstileHostname = Deno.env.get('TURNSTILE_EXPECTED_HOSTNAME') ?? '';
+  const turnstileAction = Deno.env.get('TURNSTILE_EXPECTED_ACTION') ?? '';
+  const turnstileOk = await verifyTurnstile(
+    turnstile_token,
+    turnstileSecret,
+    turnstileHostname,
+    turnstileAction
+  );
   if (!turnstileOk) {
     logEvent('turnstile_failed', { user_id: userId });
     return jsonResponse({ error: 'turnstile_failed' }, 400);

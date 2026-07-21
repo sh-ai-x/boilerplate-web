@@ -213,8 +213,21 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
   });
 });
 
-describe('A05 — CORS preflight + headers on every response', () => {
-  it('declares CORS_HEADERS and applies them via jsonResponse', () => {
+describe('A12 — Turnstile token is bound to hostname + action', () => {
+  it('verifyTurnstile enforces hostname/action against env allow-lists', () => {
+    // Defense-in-depth: a token minted under the same site key for a
+    // different action or hostname (dev vs prod) must be rejected.
+    expect(BILLING).toMatch(/data\.hostname/);
+    expect(BILLING).toMatch(/data\.action/);
+    expect(BILLING).toMatch(/TURNSTILE_EXPECTED_HOSTNAME/);
+    expect(BILLING).toMatch(/TURNSTILE_EXPECTED_ACTION/);
+  });
+  it('still short-circuits when success !== true', () => {
+    expect(BILLING).toMatch(/data\.success !== true/);
+  });
+});
+
+describe('A05 — CORS preflight + headers on every response', () => {  it('declares CORS_HEADERS and applies them via jsonResponse', () => {
     expect(BILLING).toMatch(/CORS_HEADERS/);
     expect(BILLING).toMatch(/access-control-allow-origin/);
     expect(BILLING).toMatch(/access-control-allow-methods/);
