@@ -84,6 +84,29 @@ async function verifyTurnstile(token: string, secretKey: string): Promise<boolea
 
 type PlanInterval = 'month' | 'year';
 
+// A04: clamp the day to the last day of the target month. Without this
+// guard, setMonth(+1) on Jan 31 rolls over to Mar 3 (Feb has 28 days),
+// drifting every subsequent bill. Examples preserved:
+//   Jan 31 + 1 month -> Feb 28/29 (NOT Mar 3)
+//   May 31 + 1 month -> Jun 30
+//   Jul 31 + 1 month -> Aug 31
+function addInterval(d: Date, interval: PlanInterval): Date {
+  const next = new Date(d);
+  if (interval === 'year') {
+    next.setFullYear(next.getFullYear() + 1);
+    return next;
+  }
+  const targetMonth = next.getMonth() + 1;
+  next.setMonth(targetMonth);
+  // If setMonth overflowed (e.g. Jan 31 -> Mar 3), the JS Date object
+  // already normalizes to the next occurrence. Roll back to the LAST day
+  // of the intended target month instead.
+  if (next.getMonth() !== targetMonth % 12) {
+    next.setDate(0);
+  }
+  return next;
+}
+
 async function fetchPlan(
   supabase: ReturnType<typeof createClient>,
   planId: string
@@ -282,15 +305,10 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: result.error }, 502);
   }
 
-  // A04: next-bill date must respect the plan's interval. The previous
-  // implementation hard-coded +1 month, so a yearly plan was scheduled to
-  // bill again in 30 days (12x oversell). Branch on plan.interval.
-  const nextBill = new Date();
-  if (plan.interval === 'year') {
-    nextBill.setFullYear(nextBill.getFullYear() + 1);
-  } else {
-    nextBill.setMonth(nextBill.getMonth() + 1);
-  }
+  // A04: next-bill date uses addInterval so end-of-month days clamp to
+  // the last day of the target month (Jan 31 -> Feb 28/29) instead of
+  // rolling forward (Jan 31 + 1 month -> Mar 3).
+  const nextBill = addInterval(new Date(), plan.interval);
   const { data: sub, error: subErr } = await supabase
     .from('subscriptions')
     .insert({
