@@ -399,6 +399,37 @@ Deno.serve(async (req: Request) => {
   // billing key against another user's identity.
   const customerKey = userId;
 
+  // A06/F10: per-user billing rate limit (1 attempt per minute). This is
+  // an application-side guard on top of the upstream provider quotas
+  // (Cloudflare Turnstile, Toss). Without it, an authenticated user can
+  // replay this function as fast as their browser lets them and drive
+  // the provider quota for everyone. The check happens BEFORE Turnstile
+  // verification so a flood does not also drive Cloudflare's per-IP
+  // rate limit and lock out legitimate users on the same NAT.
+  // 429 Too Many Requests is the correct status: the request is well-
+  // formed, the caller is authenticated, the only problem is frequency.
+  const { data: rateAllowed, error: rateErr } = await userClient.rpc(
+    'check_billing_rate_limit',
+    {
+      p_user_id: userId,
+      p_max_per_minute: 1,
+    }
+  );
+  if (rateErr) {
+    // A06/F10: rate-limit check errored — fail closed. Without this, a
+    // DB hiccup would silently disable the rate limit, which is the
+    // exact regression we are trying to prevent.
+    logEvent('billing_rate_limit_error', {
+      user_id: userId,
+      error: rateErr.message,
+    });
+    return jsonResponse({ error: 'billing_rate_limit_unavailable' }, 503);
+  }
+  if (rateAllowed === false) {
+    logEvent('billing_rate_limited', { user_id: userId });
+    return jsonResponse({ error: 'billing_rate_limited' }, 429);
+  }
+
   const turnstileSecret = Deno.env.get('TURNSTILE_SECRET_KEY') ?? '';
   const turnstileHostname = Deno.env.get('TURNSTILE_EXPECTED_HOSTNAME') ?? '';
   const turnstileAction = Deno.env.get('TURNSTILE_EXPECTED_ACTION') ?? '';

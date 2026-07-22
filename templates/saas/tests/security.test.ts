@@ -377,6 +377,56 @@ describe('A06 — no duplicate active subscriptions', () => {
   });
 });
 
+describe('A06 — per-user billing rate limit (F10)', () => {
+  const MIGRATION_0004 = read('../supabase/migrations/0004_billing_rate_limit.sql');
+
+  it('migration 0004 declares billing_attempts table + check_billing_rate_limit RPC', () => {
+    expect(MIGRATION_0004).toMatch(/create table if not exists public\.billing_attempts/);
+    expect(MIGRATION_0004).toMatch(/create or replace function public\.check_billing_rate_limit/);
+    // The function must be granted only to service_role.
+    expect(MIGRATION_0004).toMatch(/grant execute on function public\.check_billing_rate_limit\([^)]+\) to service_role/);
+  });
+  it('Edge Function calls check_billing_rate_limit BEFORE Turnstile / Toss', () => {
+    // The rate-limit check must be the FIRST downstream call after auth —
+    // it is the cheap defense against a flood, so it gates everything
+    // expensive (Turnstile verify + Toss issuance).
+    const authIdx = BILLING.indexOf('userId = userData?.user?.id');
+    const rateIdx = BILLING.indexOf('check_billing_rate_limit');
+    const turnstileIdx = BILLING.indexOf('TURNSTILE_EXPECTED_HOSTNAME');
+    // The Toss issue call site is reached by an `await issueBillingKey({`
+    // line that lives AFTER the auth block. The function definition
+    // `async function issueBillingKey(...)` is much earlier, so anchor
+    // on the call site only.
+    const tossIdx = BILLING.indexOf('await issueBillingKey({');
+    expect(authIdx).toBeGreaterThan(0);
+    expect(rateIdx).toBeGreaterThan(authIdx);
+    expect(rateIdx).toBeLessThan(turnstileIdx);
+    expect(rateIdx).toBeLessThan(tossIdx);
+  });
+  it('rate-limit error returns 503 (service unavailable) — fail closed', () => {
+    // A DB error must not silently disable the rate limit. Pin the
+    // 503 short-circuit on rate-limit errors.
+    const rateBlock = BILLING.slice(
+      BILLING.indexOf('check_billing_rate_limit'),
+      BILLING.indexOf('TURNSTILE_EXPECTED_HOSTNAME')
+    );
+    expect(rateBlock).toMatch(/billing_rate_limit_error/);
+    expect(rateBlock).toMatch(/503/);
+    expect(rateBlock).toMatch(/billing_rate_limit_unavailable/);
+  });
+  it('rate-limited user gets 429 Too Many Requests', () => {
+    const rateBlock = BILLING.slice(
+      BILLING.indexOf('check_billing_rate_limit'),
+      BILLING.indexOf('TURNSTILE_EXPECTED_HOSTNAME')
+    );
+    expect(rateBlock).toMatch(/billing_rate_limited/);
+    expect(rateBlock).toMatch(/429/);
+    // The 429 must come AFTER the 503 guard (rate-error first, then rate-limit).
+    expect(rateBlock.indexOf('billing_rate_limited'))
+      .toBeGreaterThan(rateBlock.indexOf('billing_rate_limit_unavailable'));
+  });
+});
+
 describe('A06 — Turnstile context binding fails closed on missing env (F9)', () => {
   // Slice the turnstile block: from the env reads to the verifyTurnstile call.
   const turnstileIdx = BILLING.indexOf('TURNSTILE_EXPECTED_HOSTNAME');
