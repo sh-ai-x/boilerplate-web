@@ -402,6 +402,24 @@ Deno.serve(async (req: Request) => {
   const turnstileSecret = Deno.env.get('TURNSTILE_SECRET_KEY') ?? '';
   const turnstileHostname = Deno.env.get('TURNSTILE_EXPECTED_HOSTNAME') ?? '';
   const turnstileAction = Deno.env.get('TURNSTILE_EXPECTED_ACTION') ?? '';
+  // A06/F9: turnstile context binding MUST be enforced, not skipped. The
+  // previous handler passed empty strings to verifyTurnstile and the
+  // helper's `if (expectedHostname && ...)` short-circuited the check —
+  // a token minted under the same site key for any host / action would
+  // be accepted. That defeats the replay-binding defense: an attacker
+  // who solves a Turnstile on their own origin can replay the token
+  // against the production billing endpoint. Fail closed: refuse to
+  // serve any request until the operator configures the binding env
+  // vars. 503 (service unavailable) is the right status: it is not a
+  // caller error (400) and not a downstream failure (502); it is a
+  // misconfigured deploy that the operator must fix.
+  if (!turnstileHostname || !turnstileAction) {
+    logEvent('turnstile_context_binding_unconfigured', {
+      has_hostname: Boolean(turnstileHostname),
+      has_action: Boolean(turnstileAction),
+    });
+    return jsonResponse({ error: 'turnstile_context_binding_unconfigured' }, 503);
+  }
   const turnstileOk = await verifyTurnstile(
     turnstile_token,
     turnstileSecret,

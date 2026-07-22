@@ -377,6 +377,39 @@ describe('A06 — no duplicate active subscriptions', () => {
   });
 });
 
+describe('A06 — Turnstile context binding fails closed on missing env (F9)', () => {
+  // Slice the turnstile block: from the env reads to the verifyTurnstile call.
+  const turnstileIdx = BILLING.indexOf('TURNSTILE_EXPECTED_HOSTNAME');
+  const verifyIdx = BILLING.indexOf('await verifyTurnstile(');
+  const turnstileBlock = BILLING.slice(turnstileIdx, verifyIdx);
+
+  it('refuses to verify when TURNSTILE_EXPECTED_HOSTNAME is unset', () => {
+    expect(turnstileBlock).toMatch(/!turnstileHostname\s*\|\|\s*!turnstileAction/);
+  });
+  it('returns 503 (service unavailable) when context binding is unconfigured', () => {
+    // 503 is the right status: not a caller error (400), not a downstream
+    // failure (502); it is a misconfigured deploy that the operator must
+    // fix. A 400 would let an attacker retry indefinitely; a 502 would
+    // be retried by Supabase's job queue.
+    expect(turnstileBlock).toMatch(/503/);
+    expect(turnstileBlock).toMatch(/turnstile_context_binding_unconfigured/);
+  });
+  it('the binding guard short-circuits BEFORE verifyTurnstile is called', () => {
+    // Pin the ordering: the unconfigured guard must appear BEFORE the
+    // verifyTurnstile call site. The slice ends at the call, so the
+    // call itself is not in turnstileBlock; the assertion is that the
+    // 503 short-circuit return IS in the slice (and it cannot be there
+    // unless it precedes the call site, since the slice stops at it).
+    expect(turnstileBlock).toMatch(/turnstile_context_binding_unconfigured[\s\S]*?return jsonResponse/);
+  });
+  it('logs the unconfigured state via the structured logger', () => {
+    expect(turnstileBlock).toMatch(/logEvent\('turnstile_context_binding_unconfigured'/);
+    // Log must indicate which binding is unset (operator triage signal).
+    expect(turnstileBlock).toMatch(/has_hostname/);
+    expect(turnstileBlock).toMatch(/has_action/);
+  });
+});
+
 describe('A04 — TOSS_SECRET_KEY validated at module top (F8)', () => {
   it('TOSS_SECRET_KEY is required via requireEnv() at module scope', () => {
     // Without this, a fresh deploy would emit the well-known empty
