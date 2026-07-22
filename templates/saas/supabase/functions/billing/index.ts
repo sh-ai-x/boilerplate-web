@@ -15,6 +15,31 @@
 // (locked hashes) rather than a mutable third-party CDN URL.
 import { createClient } from 'jsr:@supabase/supabase-js@2.45.4';
 
+// A10/F7: validate required env at module load. A missing SUPABASE_URL
+// or SUPABASE_SERVICE_ROLE_KEY would otherwise reach createClient() and
+// throw a generic "supabaseUrl is required" exception that 500s the
+// Edge Function without telling the operator what to fix. Pin the
+// failure to a clear message at startup — Deno treats top-level throws
+// as "function crashed at boot", which surfaces in the Supabase logs
+// dashboard with the env name and a remediation hint.
+function requireEnv(name: string): string {
+  const v = Deno.env.get(name);
+  if (!v) {
+    throw new Error(
+      `Missing required env: ${name}. ` +
+        `Set it in supabase/functions/billing/.env or via ` +
+        `'supabase secrets set ${name}=...'.`
+    );
+  }
+  return v;
+}
+
+// Module-level validation. Runs once at function cold-start. If any of
+// these are missing, the function never serves a single request — the
+// operator sees the missing-env message in the deploy logs.
+const SUPABASE_URL = requireEnv('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
+
 const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const TOSS_CONFIRM_URL = 'https://api.tosspayments.com/v1/billing/authorizations/issue';
 const TOSS_BILLING_AUTH_URL = 'https://api.tosspayments.com/v1/billing/authorizations';
@@ -333,7 +358,11 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'missing auth_key' }, 400);
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  // A10/F7: SUPABASE_URL is module-level validated (see top of file). The
+  // handler re-uses the constant so a request handler can never observe an
+  // empty url (createClient throws synchronously on empty url). The previous
+  // code re-read SUPABASE_URL here and silently coerced missing to ''.
+  const supabaseUrl = SUPABASE_URL;
 
   // A01/A07: authenticate the caller at the very top, BEFORE any side effect
   // (Turnstile verify, Toss issuance, DB writes). No provider-side billing key
@@ -369,8 +398,8 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'turnstile_failed' }, 400);
   }
 
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  const supabase = createClient(supabaseUrl, serviceKey, {
+  // A10/F7: SUPABASE_SERVICE_ROLE_KEY is module-level validated.
+  const supabase = createClient(supabaseUrl, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 

@@ -377,6 +377,44 @@ describe('A06 — no duplicate active subscriptions', () => {
   });
 });
 
+describe('A10 — module-level env validation (F7)', () => {
+  it('declares a requireEnv helper that throws with a clear remediation hint', () => {
+    // The previous code read SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY at
+    // request time and silently coerced missing to ''. The empty string
+    // reached createClient() which threw a generic "supabaseUrl is
+    // required" 500. Pin the helper that flips the failure mode.
+    expect(BILLING).toMatch(/function requireEnv\(name:\s*string\)/);
+    expect(BILLING).toMatch(/Missing required env:/);
+    expect(BILLING).toMatch(/supabase secrets set/);
+  });
+  it('validates SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY at module top', () => {
+    // The requireEnv calls must appear at module scope (NOT inside the
+    // Deno.serve handler) so the function fails fast at boot rather
+    // than on every request.
+    expect(BILLING).toMatch(/const SUPABASE_URL\s*=\s*requireEnv\('SUPABASE_URL'\)/);
+    expect(BILLING).toMatch(/const SUPABASE_SERVICE_ROLE_KEY\s*=\s*requireEnv\('SUPABASE_SERVICE_ROLE_KEY'\)/);
+    // Module-level constants must appear BEFORE Deno.serve.
+    const serveIdx = BILLING.indexOf('Deno.serve');
+    const urlConstIdx = BILLING.indexOf('const SUPABASE_URL =');
+    const keyConstIdx = BILLING.indexOf('const SUPABASE_SERVICE_ROLE_KEY =');
+    expect(urlConstIdx).toBeGreaterThan(0);
+    expect(urlConstIdx).toBeLessThan(serveIdx);
+    expect(keyConstIdx).toBeGreaterThan(0);
+    expect(keyConstIdx).toBeLessThan(serveIdx);
+  });
+  it('handler uses the module-level constants (no request-time re-read of SUPABASE_URL/KEY)', () => {
+    // Pin that the handler reads the module-level constants, NOT the env
+    // vars directly. A request-time re-read would silently re-introduce
+    // the empty-string failure mode.
+    const serveIdx = BILLING.indexOf('Deno.serve');
+    const handler = BILLING.slice(serveIdx);
+    expect(handler).toMatch(/const supabaseUrl\s*=\s*SUPABASE_URL/);
+    expect(handler).toMatch(/SUPABASE_SERVICE_ROLE_KEY/);
+    expect(handler).not.toMatch(/Deno\.env\.get\('SUPABASE_URL'\)/);
+    expect(handler).not.toMatch(/Deno\.env\.get\('SUPABASE_SERVICE_ROLE_KEY'\)/);
+  });
+});
+
 describe('A07 — OAuth callback route establishes the SSR session (F6)', () => {
   const CALLBACK = read('../app/auth/callback/route.ts');
 
