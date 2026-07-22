@@ -129,9 +129,12 @@ describe('A03 — committed lockfile', () => {
 });
 
 describe('A04 — atomic CAS billing-key cleanup', () => {
-  it('0001 declares claim_toss_billing_key_cleanup returning boolean', () => {
+  it('0001 declares claim_toss_billing_key_cleanup returning text (tri-state)', () => {
+    // A10/F11: the return type was changed from boolean to text to make
+    // the 'error' state explicit. 'true' = KEEP, 'false' = DELETE,
+    // 'error' = UNKNOWN (never delete).
     expect(MIGRATION_0001).toMatch(
-      /create or replace function public\.claim_toss_billing_key_cleanup\([\s\S]*?p_active_subscription_id uuid[\s\S]*?returns boolean/
+      /create or replace function public\.claim_toss_billing_key_cleanup\([\s\S]*?p_active_subscription_id uuid[\s\S]*?returns text/
     );
   });
   // The previous implementation did a destructive UPDATE that returned the
@@ -142,7 +145,7 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
   it('0001 cleanup is a read-only existence check (no destructive UPDATE)', () => {
     // The function body must NOT mark rows abandoned.
     const fnMatch = MIGRATION_0001.match(
-      /create or replace function public\.claim_toss_billing_key_cleanup[\s\S]*?returns boolean([\s\S]*?)as \$\$([\s\S]*?)\$\$/
+      /create or replace function public\.claim_toss_billing_key_cleanup[\s\S]*?returns text([\s\S]*?)as \$\$([\s\S]*?)\$\$/
     );
     expect(fnMatch).not.toBeNull();
     const body = fnMatch![2];
@@ -152,34 +155,34 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
     expect(body).toMatch(/from public\.subscriptions/i);
     expect(body).toMatch(/where billing_key = p_billing_key/i);
   });
-  // Scenario-A regression: a loser's cleanup call must return TRUE when a
-  // winning row already holds the billing_key, so the Edge Function KEEPS the
-  // Toss key instead of deleting it. Reproduce the bug-prone SQL semantics
-  // in JS so the test fails if a future contributor reintroduces the UPDATE
-  // pattern.
-  it('A04 regression: RPC returns TRUE when winner row has the billing_key (no DELETE)', () => {
-    // The RPC contract: TRUE iff some row has the billing_key. The
+  // Scenario-A regression: a loser's cleanup call must return 'true' when a
+  // winning row already holds the billing_key, so the Edge Function KEEPS
+  // the Toss key instead of deleting it. Reproduce the bug-prone SQL
+  // semantics in JS so the test fails if a future contributor reintroduces
+  // the UPDATE pattern.
+  it('A04 regression: RPC returns "true" when winner row has the billing_key (no DELETE)', () => {
+    // The RPC contract: 'true' iff some row has the billing_key. The
     // previous UPDATE-based logic returned FALSE here because the WHERE
     // excluded the winner's row, matching zero rows.
-    function rpcSemantics(rows: { id: string; billing_key: string }[], p_billing_key: string): boolean {
-      return rows.some((r) => r.billing_key === p_billing_key);
+    function rpcSemantics(rows: { id: string; billing_key: string }[], p_billing_key: string): 'true' | 'false' {
+      return rows.some((r) => r.billing_key === p_billing_key) ? 'true' : 'false';
     }
     // Race: winner W just inserted with the same billing_key.
     const winner = [{ id: 'winner-id', billing_key: 'BK_FROM_TOSS' }];
-    expect(rpcSemantics(winner, 'BK_FROM_TOSS')).toBe(true);
-    // No row holds the key -> RPC returns FALSE -> safe to delete orphan.
-    expect(rpcSemantics([], 'BK_FROM_TOSS')).toBe(false);
-    // Stale row from another user's cancelled sub holds the key -> still TRUE.
+    expect(rpcSemantics(winner, 'BK_FROM_TOSS')).toBe('true');
+    // No row holds the key -> RPC returns 'false' -> safe to delete orphan.
+    expect(rpcSemantics([], 'BK_FROM_TOSS')).toBe('false');
+    // Stale row from another user's cancelled sub holds the key -> still 'true'.
     const stale = [{ id: 'stale-id', billing_key: 'BK_FROM_TOSS', status: 'cancelled' }];
-    expect(rpcSemantics(stale, 'BK_FROM_TOSS')).toBe(true);
+    expect(rpcSemantics(stale, 'BK_FROM_TOSS')).toBe('true');
   });
   it('Edge Function only deletes the Toss key when the CAS says it is safe', () => {
     expect(BILLING).toMatch(/claim_toss_billing_key_cleanup/);
-    // A10/F2: the gating decision is now tri-state, not boolean. The
-    // "keep" branch must be `keepKey === true`; the "delete" branch is
-    // an explicit else. The old `if (keepKey !== true)` allowed a
-    // null/error result to authorize deletion, which is the bug.
-    expect(BILLING).toMatch(/keepKey === true/);
+    // A10/F11: the gating decision is now tri-state. The "keep" branch is
+    // `keepKey === 'true'`; the "delete" branch is the explicit else.
+    // The old `if (keepKey !== true)` allowed a null/error result to
+    // authorize deletion, which is the bug.
+    expect(BILLING).toMatch(/keepKey === 'true'/);
     const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
     expect(insertFail).toMatch(/deleteBillingKey/);
     expect(insertFail).toMatch(/claim_toss_billing_key_cleanup/);
@@ -187,8 +190,8 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
     // excludes the winning row from being marked abandoned.
     expect(insertFail).toMatch(/p_active_subscription_id/);
     expect(insertFail).toMatch(/\.eq\('billing_key'/);
-    // The error/null short-circuit must be in place (F2).
-    expect(insertFail).toMatch(/rpcErr\s*\|\|\s*keepKey\s*===\s*null/);
+    // The error/null short-circuit must be in place (F2 + F11).
+    expect(insertFail).toMatch(/rpcErr\s*\|\|\s*keepKey === null\s*\|\|\s*keepKey === 'error'/);
   });
   it('interval-aware next_bill_at: uses addInterval helper', () => {
     expect(BILLING).toMatch(/function addInterval\(d: Date, interval:/);
@@ -677,6 +680,59 @@ describe('A10 — duplicate-subscription check fails closed on DB error (F3)', (
   });
 });
 
+describe('A10/F11 — cleanup RPC returns a tri-state and caller fails closed', () => {
+  it('0001 RPC returns TEXT tri-state (true | false | error), not boolean', () => {
+    // The previous return type was boolean; a 'false' from a transient
+    // RPC error was indistinguishable from 'false' meaning "no row holds
+    // this key". The TEXT return type with the explicit 'error' literal
+    // makes the contract explicit at both ends.
+    expect(MIGRATION_0001).toMatch(
+      /create or replace function public\.claim_toss_billing_key_cleanup[\s\S]*?returns text/
+    );
+    expect(MIGRATION_0001).not.toMatch(
+      /create or replace function public\.claim_toss_billing_key_cleanup[\s\S]*?returns boolean/
+    );
+  });
+  it('0001 RPC body returns "error" on exception (no exception leaks to caller)', () => {
+    // The function body must wrap the existence check in an exception
+    // handler that returns 'error' on any failure. Otherwise a transient
+    // DB issue would raise to supabase-js, the caller would see
+    // error=null + data=null — ambiguous between "cancelled job" and
+    // "RPC errored". The explicit 'error' return closes that gap.
+    const fnMatch = MIGRATION_0001.match(
+      /create or replace function public\.claim_toss_billing_key_cleanup[\s\S]*?returns text([\s\S]*?)as \$\$([\s\S]*?)\$\$/
+    );
+    expect(fnMatch).not.toBeNull();
+    const body = fnMatch![2];
+    expect(body).toMatch(/exception when others then/i);
+    expect(body).toMatch(/return\s+'error'/);
+  });
+  it('0001 RPC returns the three literal states explicitly', () => {
+    const fnMatch = MIGRATION_0001.match(
+      /create or replace function public\.claim_toss_billing_key_cleanup[\s\S]*?returns text([\s\S]*?)as \$\$([\s\S]*?)\$\$/
+    );
+    expect(fnMatch).not.toBeNull();
+    const body = fnMatch![2];
+    expect(body).toMatch(/return\s+'true'/);
+    expect(body).toMatch(/return\s+'false'/);
+    expect(body).toMatch(/return\s+'error'/);
+  });
+  it('Edge Function caller handles all three states (true/false/error)', () => {
+    const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
+    // Pin the tri-state handling. The caller MUST treat 'error' as a
+    // destructive-denial signal, not as 'safe to delete'.
+    expect(insertFail).toMatch(/keepKey === 'true'/);
+    expect(insertFail).toMatch(/keepKey === 'false'/);
+    expect(insertFail).toMatch(/keepKey === 'error'/);
+    expect(insertFail).toMatch(/rpcErr\s*\|\|\s*keepKey === null\s*\|\|\s*keepKey === 'error'/);
+    // The deleteBillingKey call must NOT appear inside the error/null branch.
+    const errorBranchEnd = insertFail.indexOf("reason: rpcErr ? 'rpc_error' : keepKey === 'error'");
+    expect(errorBranchEnd).toBeGreaterThan(0);
+    const deleteCallIdx = insertFail.indexOf('deleteBillingKey(supabase,');
+    expect(deleteCallIdx).toBeGreaterThan(errorBranchEnd);
+  });
+});
+
 describe('A10 — cleanup RPC error handling (F2)', () => {
   it('destructures BOTH `data` AND `error` from the .rpc() call', () => {
     // The cleanup RPC is the gating decision for a destructive Toss DELETE.
@@ -704,11 +760,13 @@ describe('A10 — cleanup RPC error handling (F2)', () => {
     // Pin the happy path: when the RPC confirms no row holds this key, the
     // caller deletes the orphan on Toss. This is the only branch where
     // deleteBillingKey may run. A10/F4: the call passes the supabase client
-    // so the helper can enqueue cleanup failures.
+    // so the helper can enqueue cleanup failures. A10/F11: the RPC now
+    // returns TEXT tri-state ('true'|'false'|'error'), so the comparisons
+    // are string comparisons against the literal state.
     const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
-    expect(insertFail).toMatch(/keepKey === true[\s\S]*?logEvent\('billing_key_kept'/);
+    expect(insertFail).toMatch(/keepKey === 'true'[\s\S]*?logEvent\('billing_key_kept'/);
     expect(insertFail).toMatch(/deleteBillingKey\(supabase,\s*tossAuth,\s*result\.billingKey\)/);
-    // The kept branch (keepKey === true) must appear BEFORE the delete branch.
+    // The kept branch (keepKey === 'true') must appear BEFORE the delete branch.
     expect(insertFail.indexOf("logEvent('billing_key_kept'"))
       .toBeLessThan(insertFail.indexOf('deleteBillingKey('));
   });
