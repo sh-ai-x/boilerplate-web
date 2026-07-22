@@ -135,6 +135,15 @@ def _collect_texts_from_msg(msg: dict) -> list[str]:
                             texts.append(str(item.get("text", "")))
                         elif isinstance(item, str):
                             texts.append(item)
+        elif isinstance(result, list):
+            # A newer action version may emit a list-shaped result (a
+            # content-block array) directly. Walk it the same way as the
+            # dict branch's list values so the verdict is not dropped.
+            for item in result:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    texts.append(str(item.get("text", "")))
+                elif isinstance(item, str):
+                    texts.append(item)
     return texts
 
 

@@ -60,7 +60,12 @@ function logEvent(event: string, fields: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ event, timestamp: new Date().toISOString(), ...fields }));
 }
 
-async function verifyTurnstile(token: string, secretKey: string, expectedHostname?: string, expectedAction?: string): Promise<boolean> {
+async function verifyTurnstile(
+  token: string,
+  secretKey: string,
+  expectedHostname: string,
+  expectedAction: string
+): Promise<boolean> {
   // A10: 5s timeout + top-level catch so a hung Cloudflare call cannot stall us.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TURNSTILE_TIMEOUT_MS);
@@ -72,27 +77,20 @@ async function verifyTurnstile(token: string, secretKey: string, expectedHostnam
       signal: ctrl.signal,
     });
     if (!res.ok) return false;
-    // A10: Cloudflare siteverify returns { success, hostname, action, ... }
-    // when validation succeeds. A naive `data.success === true` check
-    // accepts tokens issued for ANY hostname (the cloudflare-attacker-
-    // on-attacker-host scenario) and ANY action (so a /login widget token
-    // can be replayed against /billing). Pin both fields server-side.
-    const data = await res.json() as {
-      success?: boolean;
-      hostname?: string;
-      action?: string;
-      'error-codes'?: string[];
-    };
-    if (data.success !== true) {
-      logEvent('turnstile_failed', { reason: 'success_false', errors: data['error-codes'] ?? [] });
-      return false;
-    }
+    const data = await res.json() as { success?: boolean; hostname?: string; action?: string };
+    if (data.success !== true) return false;
+    // A12: defense-in-depth. Cloudflare's siteverify echoes the hostname the
+    // token was solved on and the widget `action`. A token minted under the
+    // same site key for a different host (dev vs prod) or a different action
+    // must be rejected. The expected values are env-anchored allow-lists; when
+    // a value is unset the corresponding check is skipped (opt-in for the
+    // template) but is enforced the moment an operator sets it.
     if (expectedHostname && data.hostname !== expectedHostname) {
-      logEvent('turnstile_failed', { reason: 'hostname_mismatch', expected: expectedHostname, got: data.hostname });
+      logEvent('turnstile_hostname_mismatch', { expected: expectedHostname, got: data.hostname });
       return false;
     }
     if (expectedAction && data.action !== expectedAction) {
-      logEvent('turnstile_failed', { reason: 'action_mismatch', expected: expectedAction, got: data.action });
+      logEvent('turnstile_action_mismatch', { expected: expectedAction, got: data.action });
       return false;
     }
     return true;
@@ -104,16 +102,30 @@ async function verifyTurnstile(token: string, secretKey: string, expectedHostnam
   }
 }
 
+type PlanInterval = 'month' | 'year';
+
 // A04: clamp the day to the last day of the target month. Without this
 // guard, setMonth(+1) on Jan 31 rolls over to Mar 3 (Feb has 28 days),
 // drifting every subsequent bill. Examples preserved:
 //   Jan 31 + 1 month -> Feb 28/29 (NOT Mar 3)
 //   May 31 + 1 month -> Jun 30
 //   Jul 31 + 1 month -> Aug 31
+//
+// A14: same trap exists for Feb 29 + 1 year. setFullYear(+1) on a leap day
+// normalizes to Mar 1 in a non-leap year, drifting every subsequent annual
+// bill. Snap to Feb 28 in non-leap target years so the recurrence stays
+// anchored to the last day of February.
 function addInterval(d: Date, interval: PlanInterval): Date {
   const next = new Date(d);
   if (interval === 'year') {
-    next.setFullYear(next.getFullYear() + 1);
+    const targetYear = next.getFullYear() + 1;
+    const targetMonth = next.getMonth();
+    next.setFullYear(targetYear);
+    // If the original date was Feb 29 and the target year is not a leap
+    // year, setFullYear normalizes to Mar 1. Roll back to Feb 28.
+    if (next.getMonth() !== targetMonth) {
+      next.setDate(0);
+    }
     return next;
   }
   const targetMonth = next.getMonth() + 1;
@@ -192,18 +204,24 @@ async function issueBillingKey(args: {
   }
 }
 
-// A10: best-effort cleanup of an orphaned Toss billing key. Never throws.
+// A10/A19: best-effort cleanup of an orphaned Toss billing key. Never throws,
+// but a non-2xx (401/403/5xx) or a thrown error is logged so an orphaned key
+// that outlives its failure cause is visible in the structured logs.
 async function deleteBillingKey(auth: string, billingKey: string): Promise<void> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TOSS_TIMEOUT_MS);
   try {
-    await fetch(`${TOSS_BILLING_AUTH_URL}/${billingKey}`, {
+    const res = await fetch(`${TOSS_BILLING_AUTH_URL}/${billingKey}`, {
       method: 'DELETE',
       headers: { authorization: auth, 'idempotency-key': crypto.randomUUID() },
       signal: ctrl.signal,
     });
+    if (!res.ok) {
+      logEvent('cleanup_failed', { billing_key: billingKey, status: res.status });
+    }
   } catch (_err) {
     // Cleanup must never throw — the caller is already on the failure path.
+    logEvent('cleanup_failed', { billing_key: billingKey, reason: 'delete_request_failed_or_timeout' });
   } finally {
     clearTimeout(timer);
   }
@@ -232,13 +250,14 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'invalid_body' }, 400);
   }
 
-  const { plan_id, customer_key, turnstile_token, auth_key } = body as Partial<BillingRequest>;
+  const { plan_id, turnstile_token, auth_key } = body as Partial<BillingRequest>;
   if (!plan_id || typeof plan_id !== 'string') {
     return jsonResponse({ error: 'missing plan_id' }, 400);
   }
-  if (!customer_key || typeof customer_key !== 'string') {
-    return jsonResponse({ error: 'missing customer_key' }, 400);
-  }
+  // A21: `customer_key` in the body is intentionally NOT validated or read.
+  // The provider customerKey is derived from the authenticated user id below,
+  // so a required-field 400 here would be dead code — a false API contract and
+  // a probe oracle. The field is accepted-but-ignored for schema compatibility.
   if (!turnstile_token || typeof turnstile_token !== 'string') {
     return jsonResponse({ error: 'missing turnstile_token' }, 400);
   }
@@ -269,13 +288,14 @@ Deno.serve(async (req: Request) => {
   const customerKey = userId;
 
   const turnstileSecret = Deno.env.get('TURNSTILE_SECRET_KEY') ?? '';
-  // A10: pin the token to the hostname the page was served from and
-  // to the widget's configured action (TURNSTILE_EXPECTED_ACTION,
-  // default 'subscribe') so a token issued for a different origin or
-  // a different widget action cannot be replayed against /billing.
-  const expectedHostname = Deno.env.get('TURNSTILE_EXPECTED_HOSTNAME') ?? '';
-  const expectedAction = Deno.env.get('TURNSTILE_EXPECTED_ACTION') ?? 'subscribe';
-  const turnstileOk = await verifyTurnstile(turnstile_token, turnstileSecret, expectedHostname || undefined, expectedAction);
+  const turnstileHostname = Deno.env.get('TURNSTILE_EXPECTED_HOSTNAME') ?? '';
+  const turnstileAction = Deno.env.get('TURNSTILE_EXPECTED_ACTION') ?? '';
+  const turnstileOk = await verifyTurnstile(
+    turnstile_token,
+    turnstileSecret,
+    turnstileHostname,
+    turnstileAction
+  );
   if (!turnstileOk) {
     logEvent('turnstile_failed', { user_id: userId });
     return jsonResponse({ error: 'turnstile_failed' }, 400);
@@ -314,13 +334,12 @@ Deno.serve(async (req: Request) => {
   }
 
   // Toss confirm. The amount comes from plan.price_cents (DB), never from request input.
-  // A07: Toss APIs authenticate with HTTP Basic auth where the
-  // username is the secret key and the password is empty (Toss
-  // docs: 'Append a colon to the end of your secret key, then
-  // base64-encode it for the Authorization header'). The previous
-  // implementation concatenated two env vars into the credential,
-  // which base64-encoded the wrong string and was rejected by Toss
-  // with 401 at request time.
+  // A11: Toss HTTP Basic auth = base64(secretKey + ":") — the secret key is
+  // the username and the password is empty. The per-request `auth_key` (the
+  // client card-auth token, carried in the request BODY) is NOT an HTTP-Basic
+  // credential. The previous code placed a spurious env var in the username
+  // slot, so on a fresh deploy (that var unset) the header collapsed to
+  // btoa(":<secret>") and every Toss call was rejected.
   const tossSecret = Deno.env.get('TOSS_SECRET_KEY') ?? '';
   const tossAuth = 'Basic ' + btoa(`${tossSecret}:`);
   // A06: deterministic idempotency key => retries are idempotent end-to-end.

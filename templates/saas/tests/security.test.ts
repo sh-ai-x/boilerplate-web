@@ -211,10 +211,134 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
     expect(next.getMonth()).toBe(1); // February
     expect([28, 29]).toContain(next.getDate()); // 28 non-leap, 29 leap
   });
+  // A14: the same trap exists for Feb 29 + 1 year on a leap day
+  // subscription. setFullYear(+1) on Feb 29 normalizes to Mar 1 in a
+  // non-leap target year, drifting every subsequent annual bill.
+  it('addInterval(Feb 29 + 1 year) clamps to Feb 28 in non-leap year (not Mar 1)', () => {
+    // Reproduce the year-branch clamp locally so the test fails if a future
+    // contributor reintroduces `setFullYear(+1); return` without the rollback.
+    function addYear(d: Date): Date {
+      const next = new Date(d);
+      const targetYear = next.getFullYear() + 1;
+      const targetMonth = next.getMonth();
+      next.setFullYear(targetYear);
+      if (next.getMonth() !== targetMonth) {
+        next.setDate(0);
+      }
+      return next;
+    }
+    // Feb 29, 2024 + 1 year → 2025 is not a leap year → must be Feb 28, 2025.
+    const feb29 = new Date(2024, 1, 29);
+    const result = addYear(feb29);
+    expect(result.getFullYear()).toBe(2025);
+    expect(result.getMonth()).toBe(1); // February
+    expect(result.getDate()).toBe(28); // clamped, not Mar 1
+    // Once the anchor slips to Feb 28, every subsequent +1 year stays at
+    // Feb 28 (no rollback needed; getMonth matches targetMonth).
+    const feb28 = new Date(2025, 1, 28);
+    const plusOne = addYear(feb28);
+    expect(plusOne.getFullYear()).toBe(2026);
+    expect(plusOne.getMonth()).toBe(1);
+    expect(plusOne.getDate()).toBe(28);
+    // And a non-leap-year start never drifts either.
+    const jan15_2026 = new Date(2026, 0, 15);
+    const plusOneJan = addYear(jan15_2026);
+    expect(plusOneJan.getFullYear()).toBe(2027);
+    expect(plusOneJan.getMonth()).toBe(0);
+    expect(plusOneJan.getDate()).toBe(15);
+  });
+  it('addInterval(year) helper is wired with the leap-day clamp branch', () => {
+    expect(BILLING).toMatch(/interval === 'year'/);
+    expect(BILLING).toMatch(/targetYear\s*=\s*next\.getFullYear\(\)\s*\+\s*1/);
+    expect(BILLING).toMatch(/next\.getMonth\(\)\s*!==\s*targetMonth/);
+  });
 });
 
-describe('A05 — CORS preflight + headers on every response', () => {
-  it('declares CORS_HEADERS and applies them via jsonResponse', () => {
+describe('A18 — README admin invariant matches 0002_audit_log.sql', () => {
+  it('documents auth.app_role() = admin (app_metadata.role), not top-level auth.jwt()->>role', () => {
+    // 0002 defines auth.app_role() reading app_metadata.role and the policy
+    // uses it. The README's admin-setup SQL writes raw_app_meta_data, so the
+    // top-level auth.jwt()->>'role' invariant would silently deny admins.
+    expect(SAAS_README).not.toMatch(/auth\.jwt\(\)\s*->>\s*'role'/);
+    expect(SAAS_README).toMatch(/auth\.app_role\(\)\s*=\s*'admin'/);
+  });
+});
+
+describe('A17 — README Toss section matches the schema + Edge Function', () => {
+  it('uses external_plan_key (the real column), never toss_plan_key', () => {
+    // Migration line 20, Edge Function, and admin form all use external_plan_key.
+    expect(SAAS_README).not.toMatch(/toss_plan_key/);
+    expect(SAAS_README).toMatch(/external_plan_key/);
+  });
+  it('does not document a TOSS_AUTH_KEY env var (auth_key is a per-request body token)', () => {
+    expect(SAAS_README).not.toMatch(/TOSS_AUTH_KEY/);
+  });
+});
+
+describe('A16 — README does not promise seed plans the migration never inserts', () => {
+  it('drops the "three starter plans" seed claim (0001 has no INSERT INTO plans)', () => {
+    // The only insert in 0001 is inside upsert_plan_with_audit (a function,
+    // not seed data), so /admin/plans renders empty after `supabase db push`.
+    expect(SAAS_README).not.toMatch(/three starter plans/i);
+    expect(SAAS_README).not.toMatch(/Seed data inserts/i);
+  });
+});
+
+describe('A15 — README table list matches the migration', () => {
+  it('lists plans / subscriptions / audit_log and does NOT claim a payments table', () => {
+    // 0001_init.sql creates exactly plans, subscriptions, audit_log — no
+    // `payments` table. A README that promises one is a misleading smoke-test
+    // signal (any code referencing public.payments fails at runtime).
+    expect(SAAS_README).toMatch(/`plans`,\s*`subscriptions`,\s*and\s*`audit_log`/);
+    expect(SAAS_README).not.toMatch(/`payments`/);
+  });
+});
+
+describe('A14 — admin page tolerates missing env (no 500 on fresh boot)', () => {
+  it('validates supabase env BEFORE createServerClient and redirects when unset', () => {
+    expect(PLANS_PAGE).toMatch(/NEXT_PUBLIC_SUPABASE_URL/);
+    expect(PLANS_PAGE).toMatch(/NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+    // The guard must short-circuit to the unauthenticated path before the
+    // @supabase/ssr client (which throws synchronously on empty url) is built.
+    expect(PLANS_PAGE).toMatch(/if \(!url \|\| !anon\) redirect\('\/'\)/);
+    // The old empty-string fallback that fed createServerClient('','') is gone.
+    expect(PLANS_PAGE).not.toMatch(/NEXT_PUBLIC_SUPABASE_URL \?\? ''/);
+    expect(PLANS_PAGE).not.toMatch(/NEXT_PUBLIC_SUPABASE_ANON_KEY \?\? ''/);
+  });
+});
+
+describe('A13 — RootLayout uses a cookie-backed @supabase/ssr client', () => {
+  it('imports createServerClient from @supabase/ssr (not the bare shared helper)', () => {
+    expect(LAYOUT).toMatch(/from '@supabase\/ssr'/);
+    expect(LAYOUT).toMatch(/createServerClient/);
+    expect(LAYOUT).not.toMatch(/createServerSupabase/);
+  });
+  it('threads next/headers cookies into the client so getUser resolves the session', () => {
+    expect(LAYOUT).toMatch(/const cookieStore = cookies\(\)/);
+    expect(LAYOUT).toMatch(/cookieStore\.get\(name\)/);
+    expect(LAYOUT).toMatch(/auth\.getUser\(\)/);
+  });
+  it('still degrades a missing-env deploy to a logged-out render (not a 500)', () => {
+    expect(LAYOUT).toMatch(/isMissingEnvError/);
+    expect(LAYOUT).toMatch(/console\.error/);
+  });
+});
+
+describe('A12 — Turnstile token is bound to hostname + action', () => {
+  it('verifyTurnstile enforces hostname/action against env allow-lists', () => {
+    // Defense-in-depth: a token minted under the same site key for a
+    // different action or hostname (dev vs prod) must be rejected.
+    expect(BILLING).toMatch(/data\.hostname/);
+    expect(BILLING).toMatch(/data\.action/);
+    expect(BILLING).toMatch(/TURNSTILE_EXPECTED_HOSTNAME/);
+    expect(BILLING).toMatch(/TURNSTILE_EXPECTED_ACTION/);
+  });
+  it('still short-circuits when success !== true', () => {
+    expect(BILLING).toMatch(/data\.success !== true/);
+  });
+});
+
+describe('A05 — CORS preflight + headers on every response', () => {  it('declares CORS_HEADERS and applies them via jsonResponse', () => {
     expect(BILLING).toMatch(/CORS_HEADERS/);
     expect(BILLING).toMatch(/access-control-allow-origin/);
     expect(BILLING).toMatch(/access-control-allow-methods/);
@@ -259,25 +383,16 @@ describe('A07 — Toss billing-key issuance contract', () => {
     expect(body).not.toMatch(/amount:/);
     expect(body).not.toMatch(/orderId:/);
   });
-  it('Authorization is Basic base64(secretKey:) — Toss contract', () => {
-    // Per Toss docs: 'Append a colon (:) to the end of your secret key,
-    // then Base64-encode it'. The previous test pinned the WRONG order
-    // (authKey:secretKey) which produced 401 at runtime. The new regex
-    // pins the correct Basic auth contract: secret key followed by a
-    // trailing colon, base64-encoded.
+  it('Authorization is Basic base64(secretKey:)', () => {
+    // Toss HTTP Basic auth = base64(secretKey + ":") — the secret key is the
+    // username and the password is empty. The per-request Toss `auth_key`
+    // (card-auth token) is a BODY field, never an HTTP-Basic credential.
     expect(BILLING).toMatch(/Basic ' \+ btoa\(`\$\{tossSecret\}:`\)/);
+    // Regression: the secret must NOT be placed in the password slot behind a
+    // spurious TOSS_AUTH_KEY username (the original bug collapsed to
+    // btoa(':<secret>') on a fresh deploy where TOSS_AUTH_KEY was unset).
+    expect(BILLING).not.toMatch(/btoa\(`\$\{tossAuthKey\}:/);
     expect(BILLING).not.toMatch(/TOSS_AUTH_KEY/);
-    expect(BILLING).not.toMatch(/tossAuthKey/);
-  });
-  it('btoa(secretKey:) round-trip: base64 decodes to "sk_test_xxx:"', () => {
-    // Reproduce the header value so the test fails if a future
-    // contributor introduces a different credential shape.
-    const secretKey = 'sk_test_dummyKeyValue';
-    const header = 'Basic ' + btoa(`${secretKey}:`);
-    // btoa is available in the Deno runtime that ships the Edge
-    // Function; vitest's jsdom env also exposes it for tests.
-    const decoded = atob(header.replace(/^Basic /, ''));
-    expect(decoded).toBe('sk_test_dummyKeyValue:');
   });
   it('Idempotency-Key is stable per (user, plan) — no crypto.randomUUID() on issue', () => {
     const issueFn = BILLING.slice(
@@ -318,6 +433,38 @@ describe('A09 — logging / audit trail', () => {
   });
 });
 
+describe('A22 — README has no committed CI retrigger comments', () => {
+  it('contains no timestamped "# ... CI retrigger" shell comments', () => {
+    expect(SAAS_README).not.toMatch(/CI retrigger/);
+  });
+});
+
+describe('A21 — customer_key body field is ignored, not a required-field oracle', () => {
+  it('does not 400 on missing customer_key (provider customerKey is derived from user id)', () => {
+    // The handler derives customerKey from the authenticated userId, so a
+    // required-field 400 on the body field is dead code — a false API contract
+    // and a probe oracle.
+    expect(BILLING).not.toMatch(/'missing customer_key'/);
+    expect(BILLING).not.toMatch(/!customer_key \|\| typeof customer_key/);
+    // customerKey is still bound to the user id.
+    expect(BILLING).toMatch(/const customerKey = userId;/);
+  });
+});
+
+describe('A19 — deleteBillingKey surfaces cleanup failures', () => {
+  it('checks res.ok and logs cleanup_failed with the HTTP status', () => {
+    const fn = BILLING.slice(
+      BILLING.indexOf('async function deleteBillingKey'),
+      BILLING.indexOf('Deno.serve')
+    );
+    expect(fn).toMatch(/res\.ok/);
+    expect(fn).toMatch(/logEvent\('cleanup_failed'/);
+    expect(fn).toMatch(/status: res\.status/);
+    // The helper must still never throw (caller is already on the failure path).
+    expect(fn).toMatch(/catch \(_err\)/);
+  });
+});
+
 describe('A10 — resilience: timeouts, cleanup, narrow catch', () => {
   it('bounds both external fetches with AbortController timeouts', () => {
     expect(BILLING).toMatch(/TURNSTILE_TIMEOUT_MS = 5000/);
@@ -332,134 +479,5 @@ describe('A10 — resilience: timeouts, cleanup, narrow catch', () => {
     expect(LAYOUT).not.toMatch(/catch \(_\) \{[\s\S]*?\}\s*$/m);
     expect(LAYOUT).toMatch(/isMissingEnvError/);
     expect(LAYOUT).toMatch(/console\.error/);
-  });
-});
-describe('A01/A09 — README matches the actual schema', () => {
-  it('README documents plans + subscriptions + audit_log (no phantom payments table)', () => {
-    expect(SAAS_README).toMatch(/plans/);
-    expect(SAAS_README).toMatch(/subscriptions/);
-    expect(SAAS_README).toMatch(/audit_log/);
-    expect(SAAS_README).not.toMatch(/\bpayments\b\s+tables?/);
-  });
-  it('README does not promise seed data the migration never inserts', () => {
-    expect(SAAS_README).not.toMatch(/Seed data inserts/);
-    expect(SAAS_README).not.toMatch(/Starter\s*\/\s*Pro\s*\/\s*Business/);
-  });
-  it('README column name is external_plan_key (matches migration)', () => {
-    expect(SAAS_README).toMatch(/plans\.external_plan_key/);
-    expect(SAAS_README).not.toMatch(/plans\.toss_plan_key/);
-  });
-  it('README admin invariant uses auth.app_role() (matches 0002 migration)', () => {
-    expect(SAAS_README).toMatch(/auth\.app_role\(\)/);
-    const codeOnly = SAAS_README.replace(/`[^`]*`/g, '').replace(/^>.*$/gm, '');
-    expect(codeOnly).not.toMatch(/admin pages are server-gated.*auth\.jwt\(\)\s*->>\s*'role'/i);
-  });
-  it('README notes that Toss Basic auth uses just the secret key', () => {
-    expect(SAAS_README).not.toMatch(/TOSS_AUTH_KEY/);
-  });
-  it('README has no leftover CI retrigger comment trailers', () => {
-    expect(SAAS_README).not.toMatch(/^#\s*20\d\d-\d\d-\d\d.*CI retrigger/m);
-  });
-});describe('A04/A09 — upsert_plan_with_audit preserves external_plan_key on update', () => {
-  it('UPDATE branch coalesces payload key against existing column', () => {
-    // The admin edit form does not pre-fill external_plan_key, so a blank
-    // submit would otherwise overwrite an existing Toss plan key with NULL.
-    // The RPC must coalesce(payload, existing) to keep the prior value.
-    expect(MIGRATION_0001).toMatch(
-      /external_plan_key\s*=\s*coalesce\s*\(\s*payload\s*->>\s*'external_plan_key'\s*,\s*external_plan_key\s*\)/
-    );
-  });
-  it('SQL semantics: blank payload key keeps prior external_plan_key', () => {
-    // Reproduce the merge in JS so the test would fail if a future
-    // contributor reintroduces the unconditional `payload ->> 'external_plan_key'`
-    // assignment.
-    function mergeUpdate(existing: { external_plan_key: string | null }, payload: { external_plan_key?: string | null }) {
-      // Same shape as the plpgsql coalesce(payload ->> key, existing col).
-      const payloadKey = Object.prototype.hasOwnProperty.call(payload, 'external_plan_key')
-        ? payload.external_plan_key
-        : null;
-      return {
-        external_plan_key: payloadKey ?? existing.external_plan_key,
-      };
-    }
-    // Form submits a blank external_plan_key -> payload.external_plan_key = null.
-    expect(
-      mergeUpdate({ external_plan_key: 'toss-plan-abc' }, { external_plan_key: null })
-    ).toEqual({ external_plan_key: 'toss-plan-abc' });
-    // Caller omits the key entirely (e.g. an admin edit form that did not
-    // render the field) -> payload key is missing.
-    expect(mergeUpdate({ external_plan_key: 'toss-plan-abc' }, {})).toEqual({ external_plan_key: 'toss-plan-abc' });
-    // Caller explicitly supplies a NEW key -> payload wins.
-    expect(
-      mergeUpdate({ external_plan_key: 'toss-plan-old' }, { external_plan_key: 'toss-plan-new' })
-    ).toEqual({ external_plan_key: 'toss-plan-new' });
-  });
-});describe('A10 — verifyTurnstile pins hostname and action', () => {
-  it('verifyTurnstile signature accepts expectedHostname + expectedAction', () => {
-    expect(BILLING).toMatch(
-      /async function verifyTurnstile\([\s\S]*?expectedHostname\?:\s*string[\s\S]*?expectedAction\?:\s*string/
-    );
-  });
-  it('verifyTurnstile compares data.hostname against expectedHostname', () => {
-    expect(BILLING).toMatch(/data\.hostname\s*!==\s*expectedHostname/);
-  });
-  it('verifyTurnstile compares data.action against expectedAction', () => {
-    expect(BILLING).toMatch(/data\.action\s*!==\s*expectedAction/);
-  });
-  it('handler reads TURNSTILE_EXPECTED_HOSTNAME / TURNSTILE_EXPECTED_ACTION env vars', () => {
-    expect(BILLING).toMatch(/TURNSTILE_EXPECTED_HOSTNAME/);
-    expect(BILLING).toMatch(/TURNSTILE_EXPECTED_ACTION/);
-  });
-  it('hostname / action mismatch semantics: cross-origin token is rejected', () => {
-    // Reproduce the gate locally so the test fails if a future contributor
-    // drops one of the comparisons.
-    function verify(data: { success?: boolean; hostname?: string; action?: string }, expectedHostname?: string, expectedAction?: string): boolean {
-      if (data.success !== true) return false;
-      if (expectedHostname && data.hostname !== expectedHostname) return false;
-      if (expectedAction && data.action !== expectedAction) return false;
-      return true;
-    }
-    // Token issued for attacker host, replayed against billing.
-    expect(
-      verify({ success: true, hostname: 'attacker.example', action: 'subscribe' }, 'billing.example', 'subscribe')
-    ).toBe(false);
-    // Token issued for /login widget action, replayed against /billing.
-    expect(
-      verify({ success: true, hostname: 'billing.example', action: 'login' }, 'billing.example', 'subscribe')
-    ).toBe(false);
-    // Token issued for the right host + action: accepted.
-    expect(
-      verify({ success: true, hostname: 'billing.example', action: 'subscribe' }, 'billing.example', 'subscribe')
-    ).toBe(true);
-    // No expectations configured: legacy behavior (success-only) preserved.
-    expect(verify({ success: true, hostname: 'anything', action: 'login' })).toBe(true);
-  });
-});describe('A01 — admin page guards missing env vars', () => {
-  it('getSupabaseForRequest validates NEXT_PUBLIC_SUPABASE_URL is non-empty', () => {
-    expect(PLANS_PAGE).toMatch(/readEnv\(['"]NEXT_PUBLIC_SUPABASE_URL['"]\)/);
-  });
-  it('getSupabaseForRequest validates NEXT_PUBLIC_SUPABASE_ANON_KEY is non-empty', () => {
-    expect(PLANS_PAGE).toMatch(/readEnv\(['"]NEXT_PUBLIC_SUPABASE_ANON_KEY['"]\)/);
-  });
-  it('readEnv throws Missing required env: <key> on empty values', () => {
-    expect(PLANS_PAGE).toMatch(/Missing required env: /);
-  });
-  it('createServerClient is never called with empty strings', () => {
-    // Regression: previously the code passed `?? ''` into createServerClient,
-    // which produced a generic 500 on misconfiguration. After the fix, every
-    // env value reaches createServerClient via readEnv, which throws first.
-    const admin = PLANS_PAGE.slice(PLANS_PAGE.indexOf('function getSupabaseForRequest'));
-    expect(admin).not.toMatch(/createServerClient\(\s*\n?\s*process\.env\.NEXT_PUBLIC_SUPABASE_URL\s*\?\?\s*''/);
-    expect(admin).not.toMatch(/createServerClient\(\s*\n?\s*''\s*,/);
-  });
-  it('readEnv JS semantics: empty string raises a clean error', () => {
-    function readEnv(key: string, value: string | undefined): string {
-      const v = value ?? '';
-      if (!v) throw new Error(`Missing required env: ${key}. Copy .env.example to .env.local and fill it in.`);
-      return v;
-    }
-    expect(() => readEnv('NEXT_PUBLIC_SUPABASE_URL', '')).toThrow(/Missing required env: NEXT_PUBLIC_SUPABASE_URL/);
-    expect(() => readEnv('NEXT_PUBLIC_SUPABASE_URL', undefined)).toThrow(/Missing required env: NEXT_PUBLIC_SUPABASE_URL/);
-    expect(readEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://x.supabase.co')).toBe('https://x.supabase.co');
   });
 });

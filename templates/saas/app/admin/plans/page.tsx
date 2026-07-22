@@ -13,58 +13,49 @@ interface Plan {
   external_plan_key: string | null;
 }
 
-// A01: getSupabaseForRequest must refuse to construct a Supabase client
-  // with empty URL / key, otherwise @supabase/ssr's createServerClient
-  // crashes inside URL parsing and the admin page returns a generic 500
-  // instead of a clear configuration error. Validate both env vars
-  // up-front and throw a contract-specific Error so the page error
-  // boundary (or the Server Action try/catch) can surface it cleanly.
-  function readEnv(key: string): string {
-    const v = process.env[key] ?? '';
-    if (!v) {
-      throw new Error(
-        `Missing required env: ${key}. Copy .env.example to .env.local and fill it in.`
-      );
-    }
-    return v;
-  }
-
-  // A07: the shared createServerSupabase() helper built a bare @supabase/supabase-js
-  // client that never read request cookies, so auth.getUser() could not resolve the
-  // caller's session and every admin page redirected. The cookie-backed
-  // @supabase/ssr createServerClient is what actually threads the request's auth
-  // cookie into Supabase auth storage.
-  function getSupabaseForRequest() {
-    const supabaseUrl = readEnv('NEXT_PUBLIC_SUPABASE_URL');
-    const supabaseAnonKey = readEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-    const cookieStore = cookies();
-    return createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value;
-          },
-          set(name: string, value: string, options: CookieOptions) {
-            try {
-              cookieStore.set({ name, value, ...options });
-            } catch (_err) {
-              // Server Components cannot set cookies. Server Action path uses a
-              // separate request where set() is allowed; this is non-fatal.
-            }
-          },
-          remove(name: string, options: CookieOptions) {
-            try {
-              cookieStore.set({ name, value: '', ...options });
-            } catch (_err) {
-              // See note above.
-            }
-          },
+// A07: the shared createServerSupabase() helper built a bare @supabase/supabase-js
+// client that never read request cookies, so auth.getUser() could not resolve the
+// caller's session and every admin page redirected. The cookie-backed
+// @supabase/ssr createServerClient is what actually threads the request's auth
+// cookie into Supabase auth storage.
+function getSupabaseForRequest() {
+  // A14: @supabase/ssr's createServerClient throws "supabaseUrl is required"
+  // synchronously when url/anon are empty, which 500s the entire /admin/plans
+  // page on a first-boot / fresh `cp .env.example .env.local`. Validate env
+  // BEFORE constructing the client and short-circuit to the unauthenticated
+  // path (redirect('/'), matching the missing-session branch) instead of
+  // crashing. redirect() throws NEXT_REDIRECT, so nothing below it runs.
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) redirect('/');
+  const cookieStore = cookies();
+  return createServerClient(
+    url,
+    anon,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
         },
-      }
-    );
-  }
+        set(name: string, value: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value, ...options });
+          } catch (_err) {
+            // Server Components cannot set cookies. Server Action path uses a
+            // separate request where set() is allowed; this is non-fatal.
+          }
+        },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value: '', ...options });
+          } catch (_err) {
+            // See note above.
+          }
+        },
+      },
+    }
+  );
+}
 
 async function requireAdminOrRedirect(): Promise<void> {
   const supabase = getSupabaseForRequest();

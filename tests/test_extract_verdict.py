@@ -230,6 +230,39 @@ class TestExtractVerdict(unittest.TestCase):
         )
         self.assertEqual(_run_parser(path), "Blocked")
 
+    # A newer claude-code-action version may emit a list-shaped `result`
+    # (a content-block array) instead of a str/dict. The parser must walk it,
+    # otherwise the verdict is silently dropped and the gate falls back to a
+    # stale comment.
+    def test_result_message_list_of_content_blocks_with_blocked(self) -> None:
+        path = self._write(
+            self.tmp / "exec.json",
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": [
+                        {"type": "text", "text": "Security review summary."},
+                        {"type": "text", "text": "Verdict: Blocked (1 critical)"},
+                    ],
+                }
+            )
+            + "\n",
+        )
+        self.assertEqual(_run_parser(path), "Blocked")
+
+    def test_result_message_list_of_strings_with_approve(self) -> None:
+        path = self._write(
+            self.tmp / "exec.json",
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": ["chatter", "Verdict: Approve"],
+                }
+            )
+            + "\n",
+        )
+        self.assertEqual(_run_parser(path), "Approve")
+
     # --- last-verdict-wins behavior across all formats ------------------
 
     def test_uses_last_verdict_across_formats(self) -> None:

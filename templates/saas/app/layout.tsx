@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { GoogleSignInButton, SignOutButton } from '@boilerplate-web/shared/auth';
-import { createServerSupabase } from '@boilerplate-web/shared/supabase';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
 export const metadata = {
@@ -8,21 +8,53 @@ export const metadata = {
   description: 'Next.js + Supabase + Toss billing-key boilerplate',
 };
 
-// A10: only the "env not configured" case may be swallowed to a logged-out
+// A13: only the "env not configured" case may be swallowed to a logged-out
 // render. Any other error (a real auth/session failure) must surface via
 // console.error so operational problems are not masked as "logged out".
 function isMissingEnvError(err: unknown): boolean {
-  return err instanceof Error && /Missing required env/.test(err.message);
+  return (
+    err instanceof Error &&
+    /Missing required env|supabaseUrl is required|supabaseKey is required/.test(err.message)
+  );
 }
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  // Server-side session check. The cookie store is wired through here.
+  // A13: the previous code called the shared bare-client helper, which built a
+  // @supabase/supabase-js client that never installed the supplied cookie
+  // store as auth storage — so auth.getUser() could not read the request
+  // session and every page rendered the logged-out nav (the Admin link never
+  // appeared for real signed-in admins). Use the same cookie-backed
+  // @supabase/ssr createServerClient the admin page uses so the auth cookie
+  // actually reaches Supabase auth.
   let sessionUser: { email?: string | null } | null = null;
   try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !anon) {
+      throw new Error('Missing required env: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    }
     const cookieStore = cookies();
-    const supabase = createServerSupabase({
-      get: (n) => cookieStore.get(n),
-      set: (n, v, o) => cookieStore.set(n, v, o as never),
+    const supabase = createServerClient(url, anon, {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value, ...options });
+          } catch (_err) {
+            // Server Components cannot set cookies; non-fatal for a read-only
+            // session check.
+          }
+        },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value: '', ...options });
+          } catch (_err) {
+            // See note above.
+          }
+        },
+      },
     });
     const { data } = await supabase.auth.getUser();
     sessionUser = data.user ? { email: data.user.email } : null;
