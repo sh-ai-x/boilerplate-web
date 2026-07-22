@@ -207,9 +207,20 @@ async function issueBillingKey(args: {
 // A10/A19: best-effort cleanup of an orphaned Toss billing key. Never throws,
 // but a non-2xx (401/403/5xx) or a thrown error is logged so an orphaned key
 // that outlives its failure cause is visible in the structured logs.
-async function deleteBillingKey(auth: string, billingKey: string): Promise<void> {
+// A10/F4: a failed cleanup is also ENQUEUED into cleanup_queue so a
+// scheduled retry job can re-attempt the DELETE. Without this, the only
+// failure record was a log line — the key would stay live on Toss until
+// an operator manually intervened. With the queue, the retry worker
+// drives cleanup to completion.
+async function deleteBillingKey(
+  supabase: ReturnType<typeof createClient>,
+  auth: string,
+  billingKey: string
+): Promise<void> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TOSS_TIMEOUT_MS);
+  let status = 0;
+  let thrownReason = '';
   try {
     const res = await fetch(`${TOSS_BILLING_AUTH_URL}/${billingKey}`, {
       method: 'DELETE',
@@ -217,13 +228,48 @@ async function deleteBillingKey(auth: string, billingKey: string): Promise<void>
       signal: ctrl.signal,
     });
     if (!res.ok) {
+      status = res.status;
       logEvent('cleanup_failed', { billing_key: billingKey, status: res.status });
+    } else {
+      // A10/F5: success path. Do NOT log the billing key on success either —
+      // it is a reusable payment credential; even confirmation logs are an
+      // unnecessary expansion of the key's blast radius.
+      logEvent('cleanup_succeeded', {});
+      return;
     }
   } catch (_err) {
     // Cleanup must never throw — the caller is already on the failure path.
-    logEvent('cleanup_failed', { billing_key: billingKey, reason: 'delete_request_failed_or_timeout' });
+    thrownReason = 'delete_request_failed_or_timeout';
+    logEvent('cleanup_failed', { billing_key: billingKey, reason: thrownReason });
   } finally {
     clearTimeout(timer);
+  }
+  // A10/F4: durable retry queue. The cleanup DELETE failed (non-2xx or
+  // thrown). Persist the failure so a scheduled worker can re-attempt.
+  // We use the RPC (not a raw INSERT) so the SQL layer controls the
+  // RLS / validation contract; the Edge Function cannot accidentally
+  // widen the queue's surface area.
+  try {
+    const { data: queueId, error: enqErr } = await supabase.rpc(
+      'enqueue_billing_key_cleanup',
+      {
+        p_billing_key: billingKey,
+        p_last_error: status ? `toss_status_${status}` : thrownReason || 'unknown',
+      }
+    );
+    if (enqErr) {
+      logEvent('cleanup_enqueue_failed', {
+        billing_key: billingKey,
+        error: enqErr.message,
+      });
+    } else {
+      logEvent('cleanup_enqueued', { queue_id: queueId });
+    }
+  } catch (_enqErr) {
+    // The enqueue itself failed — fall through to the structured log so
+    // an operator can manually retry. NEVER throw; cleanup must not
+    // escalate a retry failure into a 500 on the original request.
+    logEvent('cleanup_enqueue_threw', { billing_key: billingKey });
   }
 }
 
@@ -441,7 +487,7 @@ Deno.serve(async (req: Request) => {
       // data === false: RPC confirmed no row holds this key. Safe to delete.
       // A10: best-effort delete so an orphaned Toss key is not left dangling.
       // Cleanup never throws.
-      await deleteBillingKey(tossAuth, result.billingKey);
+      await deleteBillingKey(supabase, tossAuth, result.billingKey);
     }
     logEvent('subscription_insert_failed', { user_id: userId, plan_id });
     return jsonResponse({ error: 'subscription_insert_failed' }, 500);

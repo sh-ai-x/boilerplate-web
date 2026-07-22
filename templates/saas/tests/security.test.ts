@@ -377,6 +377,47 @@ describe('A06 — no duplicate active subscriptions', () => {
   });
 });
 
+describe('A10 — durable retry queue for failed Toss cleanups (F4)', () => {
+  const MIGRATION_0003 = read('../supabase/migrations/0003_cleanup_queue.sql');
+
+  it('migration 0003 declares cleanup_queue + enqueue_billing_key_cleanup RPC', () => {
+    expect(MIGRATION_0003).toMatch(
+      /create table if not exists public\.cleanup_queue/
+    );
+    expect(MIGRATION_0003).toMatch(
+      /create or replace function public\.enqueue_billing_key_cleanup/
+    );
+    // The function must be granted only to service_role.
+    expect(MIGRATION_0003).toMatch(
+      /grant execute on function public\.enqueue_billing_key_cleanup\([^)]+\) to service_role/
+    );
+  });
+  it('cleanup_queue has RLS enabled and is REVOKEd from anon/authenticated/public', () => {
+    expect(MIGRATION_0003).toMatch(/alter table public\.cleanup_queue enable row level security/);
+    // Belt-and-suspenders: explicit REVOKE so a future policy mistake
+    // cannot expose this table to end users.
+    expect(MIGRATION_0003).toMatch(/revoke all on public\.cleanup_queue from public/);
+    expect(MIGRATION_0003).toMatch(/revoke all on public\.cleanup_queue from anon/);
+    expect(MIGRATION_0003).toMatch(/revoke all on public\.cleanup_queue from authenticated/);
+  });
+  it('Edge Function calls enqueue_billing_key_cleanup on cleanup failure', () => {
+    // The billing function must call the enqueue RPC on non-2xx OR
+    // thrown error. A log line alone is not durable enough.
+    expect(BILLING).toMatch(/enqueue_billing_key_cleanup/);
+    expect(BILLING).toMatch(/cleanup_enqueued/);
+    expect(BILLING).toMatch(/cleanup_enqueue_failed/);
+  });
+  it('Edge Function never throws from deleteBillingKey', () => {
+    const fn = BILLING.slice(
+      BILLING.indexOf('async function deleteBillingKey'),
+      BILLING.indexOf('Deno.serve')
+    );
+    // The function must never re-throw — caller is already on a failure path.
+    expect(fn).toMatch(/catch \(_err\)/);
+    expect(fn).toMatch(/catch \(_enqErr\)/);
+  });
+});
+
 describe('A10 — duplicate-subscription check fails closed on DB error (F3)', () => {
   // Slice the dup-check section: from the A06 anchor to just before Toss
   // issuance. The end anchor is the idempotency-key setup line that
@@ -433,10 +474,11 @@ describe('A10 — cleanup RPC error handling (F2)', () => {
   it('data === false authorizes deletion (no row holds the key = orphan)', () => {
     // Pin the happy path: when the RPC confirms no row holds this key, the
     // caller deletes the orphan on Toss. This is the only branch where
-    // deleteBillingKey may run.
+    // deleteBillingKey may run. A10/F4: the call passes the supabase client
+    // so the helper can enqueue cleanup failures.
     const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
     expect(insertFail).toMatch(/keepKey === true[\s\S]*?logEvent\('billing_key_kept'/);
-    expect(insertFail).toMatch(/deleteBillingKey\(tossAuth,\s*result\.billingKey\)/);
+    expect(insertFail).toMatch(/deleteBillingKey\(supabase,\s*tossAuth,\s*result\.billingKey\)/);
     // The kept branch (keepKey === true) must appear BEFORE the delete branch.
     expect(insertFail.indexOf("logEvent('billing_key_kept'"))
       .toBeLessThan(insertFail.indexOf('deleteBillingKey('));
