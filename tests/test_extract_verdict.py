@@ -302,20 +302,52 @@ class TestExtractVerdict(unittest.TestCase):
         self.assertEqual(_run_parser(path), "Approve")
 
     # --- robustness contract --------------------------------------------
+    # A10/F1: the previous contract returned "" for ANY non-extractable case.
+    # That made the workflow's extract step default the gate to Approve when
+    # the parser failed — silently flipping a real Blocked verdict to
+    # Approve. The new contract is:
+    #   - file MISSING                       → ""  (cancelled-job tolerance)
+    #   - file EXISTS but parse fails        → PARSE_FAILED sentinel
+    #   - file EXISTS and verdict extracted  → Approve|Blocked|Changes Requested
+    # The sentinel is a non-empty, non-Verdict value that the gate's
+    # unparseable-verdict handler treats as ::warning:: + non-blocking —
+    # making the failure visible without flipping the merge to Approve.
 
     def test_missing_file_returns_empty(self) -> None:
+        # File missing is the ONLY case where empty stdout is correct. The
+        # workflow's cancelled-job / transient-backend branch reads empty
+        # stdout and falls back to PR-comment lookup (or default-Approve
+        # with ::warning::). This is the documented tolerance for transient
+        # backend issues — NOT for failed parses.
         missing = self.tmp / "absent.json"
         self.assertEqual(_run_parser(missing), "")
 
-    def test_html_error_page_returns_empty(self) -> None:
+    def test_html_error_page_returns_parse_failed_sentinel(self) -> None:
+        # The action produced a file (so it ran) but the contents are an
+        # HTML error page (e.g. 404 from a redirect). Old behavior: empty
+        # stdout → workflow defaults to Approve. New behavior: sentinel.
         path = self._write(self.tmp / "err.html", "<html><body>404 Not Found</body></html>")
-        self.assertEqual(_run_parser(path), "")
+        self.assertEqual(_run_parser(path), "PARSE_FAILED")
 
-    def test_empty_file_returns_empty(self) -> None:
+    def test_empty_file_returns_parse_failed_sentinel(self) -> None:
+        # The action produced a 0-byte file (or one shorter than 10 chars).
+        # The file exists, so the action did run; we just got nothing
+        # parseable. Sentinel, not empty.
         path = self._write(self.tmp / "empty.json", "")
-        self.assertEqual(_run_parser(path), "")
+        self.assertEqual(_run_parser(path), "PARSE_FAILED")
 
-    def test_no_verdict_anywhere_returns_empty(self) -> None:
+    def test_short_truncated_file_returns_parse_failed_sentinel(self) -> None:
+        # Anything shorter than the 10-char guard returns the sentinel.
+        # This is the "truncated mid-write" case: the action was still
+        # streaming its output when the runner killed it.
+        path = self._write(self.tmp / "short.json", "abc")
+        self.assertEqual(_run_parser(path), "PARSE_FAILED")
+
+    def test_no_verdict_anywhere_returns_parse_failed_sentinel(self) -> None:
+        # File parsed cleanly but contained no `Verdict:` line. The agent
+        # either timed out, ran out of tool calls, or never reached the
+        # verdict-emission step. Old behavior: empty → fail-open Approve.
+        # New behavior: sentinel → unparseable verdict → ::warning::.
         path = self._write(
             self.tmp / "no-verdict.json",
             json.dumps(
@@ -328,7 +360,23 @@ class TestExtractVerdict(unittest.TestCase):
             )
             + "\n",
         )
-        self.assertEqual(_run_parser(path), "")
+        self.assertEqual(_run_parser(path), "PARSE_FAILED")
+
+    def test_malformed_json_returns_parse_failed_sentinel(self) -> None:
+        # File looks like JSON but doesn't parse. Old behavior: empty.
+        # New behavior: sentinel.
+        path = self._write(self.tmp / "bad.json", "[this is not valid json")
+        self.assertEqual(_run_parser(path), "PARSE_FAILED")
+
+    def test_sentinel_is_not_one_of_the_three_known_verdicts(self) -> None:
+        # Pin the sentinel's identity: it MUST NOT collide with any of the
+        # three valid verdict values, otherwise the gate would treat a
+        # genuine parse failure as a real Blocked/Approve verdict and
+        # silently Approve or hard-block on parser misbehavior.
+        path = self._write(self.tmp / "err.html", "<html>oops</html>")
+        result = _run_parser(path)
+        self.assertNotIn(result, ("Approve", "Blocked", "Changes Requested"))
+        self.assertEqual(result, "PARSE_FAILED")
 
     # --- the pretty-printed JSON array format (commit 899c16b) -------
     # This is what anthropics/claude-code-action@v1 actually writes:

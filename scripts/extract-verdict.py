@@ -32,17 +32,31 @@ This script now:
      locations.
 
 Robustness:
-- If the file is missing, exits 0 with no output (caller falls back).
-- If the file is HTML (e.g. 404 from a redirect), exits 0 with no output.
-- If the file is JSON but has no Verdict, exits 0 with no output.
+- If the file is missing, exits 0 with no output (caller falls back —
+  this is the "cancelled job / transient backend" tolerance).
+- If the file exists but is HTML, empty, malformed, or contains no
+  Verdict: line, prints the PARSE_FAILED sentinel on stdout (and a
+  detailed reason on stderr). The downstream workflow's extract step
+  only checks `[ -n "$file_verdict" ]` before defaulting the gate to
+  `verdict="Approve"`. Returning empty here was a fail-open bug
+  (A10/F1): a truncated or malformed agent output file would silently
+  flip the gate to Approve even when the agent had actually posted a
+  real Blocked verdict. The sentinel is a non-empty, non-Verdict
+  value that the gate's unparseable-verdict handler treats as a
+  non-blocking ::warning:: — making the failure visible without
+  flipping the merge decision to Approve.
 - Returns exit 0 (not 1) on "not found" so the bash || true at the
   call site can be simplified.
 
 Usage:
   python3 extract-verdict.py <path-to-claude-execution-output.json>
 
-Prints the verdict (Approve|Blocked|Changes Requested) to stdout if found.
-Exits 0 always (no verdict on stdout = caller falls back).
+Prints to stdout:
+  - Approve|Blocked|Changes Requested if found
+  - PARSE_FAILED if the file exists but no verdict could be extracted
+  - (empty) only if the file does not exist (cancelled-job tolerance)
+
+Exits 0 always.
 """
 from __future__ import annotations
 import json
@@ -51,6 +65,29 @@ import sys
 from pathlib import Path
 
 VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
+
+# A10/F1: when the parser cannot extract a verdict from a file that DOES
+# exist (file is HTML, empty/too short, malformed JSON, or contains no
+# `Verdict:` line), emit this sentinel on stdout instead of an empty string.
+# The workflow's extract step branches on `[ -n "$file_verdict" ]`: an empty
+# value falls through to a fail-open `verdict="Approve"` default. Empty
+# stdout silently flips a failed parse to Approve — which is exactly the
+# failure mode the security agent flagged in finding F1 ("Verdict parsing
+# failures fail open to Approve").
+#
+# The sentinel is intentionally NOT one of {Approve, Blocked, Changes
+# Requested} so the gate's existing unparseable-verdict branch fires:
+#
+#   if ! { [ "$worst" = "Approve" ] || [ "$worst" = "Changes Requested" ] \
+#          || [ "$worst" = "Blocked" ]; }; then
+#     echo "::warning::Unparseable verdict '$worst' ... treating as non-blocking."
+#     exit 0
+#   fi
+#
+# The result: a parse failure is visible in the run log (::warning::) and
+# the gate does NOT silently Approve. The fix does not claim to *block*
+# merge on parse failure — it claims to not fail open to Approve.
+PARSE_FAILED_SENTINEL = "PARSE_FAILED"
 
 
 def _collect_texts_from_content(content) -> list[str]:
@@ -185,24 +222,54 @@ def _iter_messages_from_text(text: str):
 
 def extract(path: Path) -> str:
     if not path.exists():
+        # Cancelled-job / transient-backend tolerance: caller falls back to
+        # the PR-comment lookup path. Empty stdout is the deliberate signal
+        # for "no agent output file at all" — do NOT change this branch.
         return ""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
+    except OSError as exc:
+        # File exists but is unreadable. This is a parse failure, not a
+        # cancelled-job case: emit the sentinel so the workflow does not
+        # silently default to Approve.
+        print(f"extract-verdict: read_text failed: {exc}", file=sys.stderr)
+        return PARSE_FAILED_SENTINEL
     # Bail early if the file looks like an HTML error page (network
-    # failure, 404, etc.).
+    # failure, 404, etc.). The action produced a file but it is not a
+    # parseable agent-output file — this is a parse failure, not a
+    # cancelled-job case.
     peek = text.lstrip()[:1024]
     if peek.startswith("<") or peek.lower().startswith("<?xml"):
-        return ""
+        print(
+            f"extract-verdict: file looks like HTML/<?xml (first 64 chars: {peek[:64]!r}); "
+            "action ran but output is not parseable",
+            file=sys.stderr,
+        )
+        return PARSE_FAILED_SENTINEL
     if len(text) < 10:
-        return ""
+        print(
+            "extract-verdict: file is empty or too short (< 10 chars); "
+            "action ran but output is not parseable",
+            file=sys.stderr,
+        )
+        return PARSE_FAILED_SENTINEL
     last_verdict = ""
     for msg in _iter_messages_from_text(text):
         for t in _collect_texts_from_msg(msg):
             m = VERDICT_RE.search(t)
             if m:
                 last_verdict = m.group(1)
+    if not last_verdict:
+        # File parsed cleanly but contained no `Verdict:` line. The agent
+        # either timed out, ran out of tool calls, or never reached the
+        # verdict-emission step. Still a parse failure (file exists,
+        # expected signal absent) — emit the sentinel.
+        print(
+            "extract-verdict: file parsed but no `Verdict:` line was found; "
+            "action ran but produced no verdict",
+            file=sys.stderr,
+        )
+        return PARSE_FAILED_SENTINEL
     return last_verdict
 
 
@@ -212,8 +279,9 @@ def main() -> int:
         return 2
     path = Path(sys.argv[1])
     verdict = extract(path)
-    if verdict:
-        print(verdict)
+    # Always print whatever extract() returns, including PARSE_FAILED.
+    # The sentinel is the explicit signal "do NOT default to Approve".
+    print(verdict)
     return 0
 
 
