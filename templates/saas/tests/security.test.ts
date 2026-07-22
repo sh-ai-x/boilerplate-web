@@ -377,6 +377,30 @@ describe('A06 — no duplicate active subscriptions', () => {
   });
 });
 
+describe('A04 — TOSS_SECRET_KEY validated at module top (F8)', () => {
+  it('TOSS_SECRET_KEY is required via requireEnv() at module scope', () => {
+    // Without this, a fresh deploy would emit the well-known empty
+    // Basic credential 'Basic Og==' (base64(':')) and silently fail
+    // every Toss call. Validate at boot so the operator sees the
+    // missing-env message immediately.
+    expect(BILLING).toMatch(/const TOSS_SECRET_KEY\s*=\s*requireEnv\('TOSS_SECRET_KEY'\)/);
+    // Module-level constant must appear BEFORE Deno.serve.
+    const serveIdx = BILLING.indexOf('Deno.serve');
+    const tossConstIdx = BILLING.indexOf('const TOSS_SECRET_KEY =');
+    expect(tossConstIdx).toBeGreaterThan(0);
+    expect(tossConstIdx).toBeLessThan(serveIdx);
+  });
+  it('handler builds Toss auth from the module-level TOSS_SECRET_KEY constant', () => {
+    // The handler must NOT re-read TOSS_SECRET_KEY from env at request time.
+    const serveIdx = BILLING.indexOf('Deno.serve');
+    const handler = BILLING.slice(serveIdx);
+    expect(handler).toMatch(/btoa\(`\$\{TOSS_SECRET_KEY\}:`\)/);
+    expect(handler).not.toMatch(/Deno\.env\.get\('TOSS_SECRET_KEY'\)/);
+    // No spurious TOSS_AUTH_KEY reference (that was the OLD broken name).
+    expect(handler).not.toMatch(/TOSS_AUTH_KEY/);
+  });
+});
+
 describe('A10 — module-level env validation (F7)', () => {
   it('declares a requireEnv helper that throws with a clear remediation hint', () => {
     // The previous code read SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY at
@@ -629,7 +653,9 @@ describe('A07 — Toss billing-key issuance contract', () => {
     // Toss HTTP Basic auth = base64(secretKey + ":") — the secret key is the
     // username and the password is empty. The per-request Toss `auth_key`
     // (card-auth token) is a BODY field, never an HTTP-Basic credential.
-    expect(BILLING).toMatch(/Basic ' \+ btoa\(`\$\{tossSecret\}:`\)/);
+    // A04/F8: TOSS_SECRET_KEY is now module-level validated and the handler
+    // uses the constant directly (no per-request re-read of the env var).
+    expect(BILLING).toMatch(/Basic ' \+ btoa\(`\$\{TOSS_SECRET_KEY\}:`\)/);
     // Regression: the secret must NOT be placed in the password slot behind a
     // spurious TOSS_AUTH_KEY username (the original bug collapsed to
     // btoa(':<secret>') on a fresh deploy where TOSS_AUTH_KEY was unset).

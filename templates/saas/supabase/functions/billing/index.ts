@@ -40,6 +40,21 @@ function requireEnv(name: string): string {
 const SUPABASE_URL = requireEnv('SUPABASE_URL');
 const SUPABASE_SERVICE_ROLE_KEY = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
 
+// A04/F8: validate TOSS_SECRET_KEY at module top. Toss HTTP Basic auth
+// is base64(secretKey + ":") — missing secretKey collapses to btoa(":")
+// = "Og==", which is a known empty-credential that the upstream Toss
+// auth gateway will see as "no credentials supplied" rather than "bad
+// credentials supplied" — silently failing every call instead of failing
+// fast at deploy time. The operator must see this at boot, not as a
+// tail of 502s in the production logs.
+//
+// The security review flagged an OLD broken-name bug that placed a
+// spurious second credential in the username slot — the header then
+// collapsed to btoa(':<secret>') on a fresh deploy and every Toss call
+// was rejected. The only correct env var is TOSS_SECRET_KEY. The
+// migration plan is to drop the alias; this fix removes its read path.
+const TOSS_SECRET_KEY = requireEnv('TOSS_SECRET_KEY');
+
 const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const TOSS_CONFIRM_URL = 'https://api.tosspayments.com/v1/billing/authorizations/issue';
 const TOSS_BILLING_AUTH_URL = 'https://api.tosspayments.com/v1/billing/authorizations';
@@ -452,8 +467,9 @@ Deno.serve(async (req: Request) => {
   // credential. The previous code placed a spurious env var in the username
   // slot, so on a fresh deploy (that var unset) the header collapsed to
   // btoa(":<secret>") and every Toss call was rejected.
-  const tossSecret = Deno.env.get('TOSS_SECRET_KEY') ?? '';
-  const tossAuth = 'Basic ' + btoa(`${tossSecret}:`);
+  // A04/F8: TOSS_SECRET_KEY is module-level validated (see top of file).
+  // Re-use the constant here so the handler cannot observe an empty key.
+  const tossAuth = 'Basic ' + btoa(`${TOSS_SECRET_KEY}:`);
   // A06: deterministic idempotency key => retries are idempotent end-to-end.
   const idempotencyKey = `billing:${userId}:${plan_id}`;
   const result = await issueBillingKey({
