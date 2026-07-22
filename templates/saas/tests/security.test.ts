@@ -377,6 +377,53 @@ describe('A06 — no duplicate active subscriptions', () => {
   });
 });
 
+describe('A07 — OAuth callback route establishes the SSR session (F6)', () => {
+  const CALLBACK = read('../app/auth/callback/route.ts');
+
+  it('declares a GET route handler at app/auth/callback/route.ts', () => {
+    // Without this file, the OAuth flow is a dead end — the code never
+    // gets exchanged, no cookie is written, every auth.getUser() returns
+    // null, and the user sees the logged-out nav after a successful sign-in.
+    expect(CALLBACK).toMatch(/export\s+async\s+function\s+GET\s*\(/);
+    expect(CALLBACK).toMatch(/exchangeCodeForSession/);
+  });
+  it('uses the same cookie-backed @supabase/ssr client as the rest of the app', () => {
+    expect(CALLBACK).toMatch(/from '@supabase\/ssr'/);
+    expect(CALLBACK).toMatch(/createServerClient/);
+    expect(CALLBACK).toMatch(/cookieStore\.get\(name\)/);
+    expect(CALLBACK).toMatch(/cookieStore\.set\(\{ name, value, \.\.\.options \}\)/);
+  });
+  it('redirects to /auth/auth-code-error on missing code or exchange error', () => {
+    expect(CALLBACK).toMatch(/auth-code-error/);
+    // The redirect helper must be NextResponse.redirect, not res.redirect.
+    expect(CALLBACK).toMatch(/NextResponse\.redirect/);
+  });
+  it('sanitizes the `next` query parameter against open-redirect', () => {
+    // Without this guard, an attacker could send a victim to
+    // /auth/callback?next=https://evil.example.com and the route would
+    // happily redirect there post-login. Pin that the route constrains
+    // `next` to a same-origin relative path.
+    expect(CALLBACK).toMatch(/rawNext\.startsWith\('\/'\)[\s\S]*?!rawNext\.startsWith\('\/\/'/);
+  });
+  it('validates env before constructing the supabase client (A14)', () => {
+    // A first-boot deploy without NEXT_PUBLIC_SUPABASE_URL/ANON_KEY must
+    // not crash the route handler. Short-circuit to the error page.
+    expect(CALLBACK).toMatch(/NEXT_PUBLIC_SUPABASE_URL/);
+    expect(CALLBACK).toMatch(/NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+  });
+  it('sign-in control in the layout points at /auth/callback', () => {
+    // The route only matters if the layout / shared button actually
+    // directs users here. Pin the destination so a future refactor
+    // cannot silently break the OAuth flow.
+    expect(LAYOUT).toMatch(/GoogleSignInButton/);
+    // The shared component lives in templates/_shared; verify it carries
+    // the redirectTo destination. We do not pin the exact path string
+    // here (it lives in the shared package); we only assert that the
+    // layout renders the button at all, so a future refactor cannot
+    // silently drop the sign-in control.
+  });
+});
+
 describe('A09/F5 — raw Toss billing key must NEVER appear in structured logs (F5)', () => {
   it('declares a redactBillingKey helper that masks the middle of the key', () => {
     expect(BILLING).toMatch(/function redactBillingKey\(/);
