@@ -377,6 +377,36 @@ describe('A06 — no duplicate active subscriptions', () => {
   });
 });
 
+describe('A10 — duplicate-subscription check fails closed on DB error (F3)', () => {
+  // Slice the dup-check section: from the A06 anchor to just before Toss
+  // issuance. The end anchor is the idempotency-key setup line that
+  // appears just before issueBillingKey.
+  const dupIdx = BILLING.indexOf('A06: reject if the user already holds');
+  const tossIdx = BILLING.indexOf('idempotencyKey = `billing:');
+  const dupBlock = BILLING.slice(dupIdx, tossIdx);
+
+  it('destructures BOTH `data` AND `error` from the dup-check query', () => {
+    // The previous code destructured ONLY `data`; a DB error made `data`
+    // null, the check passed, and Toss key issuance proceeded while
+    // persistence was unavailable. The result: an orphan Toss billing key
+    // with no record in the database. Capture the error explicitly.
+    expect(dupBlock).toMatch(/const\s*\{\s*data:\s*existing\s*,\s*error:\s*existingErr\s*\}/);
+  });
+  it('DB error returns 503 (service unavailable) BEFORE Toss issuance', () => {
+    // The dup-check guard must short-circuit BEFORE issueBillingKey so a
+    // degraded database never produces an untracked Toss key.
+    expect(dupBlock).toMatch(/subscription_check_error/);
+    expect(dupBlock).toMatch(/503/);
+    expect(dupBlock).toMatch(/subscription_check_unavailable/);
+    // The issueBillingKey call must NOT appear inside the dup-check block.
+    expect(dupBlock).not.toMatch(/issueBillingKey\(/);
+  });
+  it('DB error is logged via the structured logger', () => {
+    expect(dupBlock).toMatch(/logEvent\('subscription_check_error'/);
+    expect(dupBlock).toMatch(/existingErr\.message/);
+  });
+});
+
 describe('A10 — cleanup RPC error handling (F2)', () => {
   it('destructures BOTH `data` AND `error` from the .rpc() call', () => {
     // The cleanup RPC is the gating decision for a destructive Toss DELETE.

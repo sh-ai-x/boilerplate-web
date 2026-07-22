@@ -321,13 +321,28 @@ Deno.serve(async (req: Request) => {
 
   // A06: reject if the user already holds an active subscription to this plan,
   // so a retried/duplicated request cannot create two active subscriptions.
-  const { data: existing } = await supabase
+  // A10/F3: capture the query's `error` separately. The previous code
+  // destructured ONLY `data`; a DB error made `data` null, the check
+  // passed, and Toss key issuance proceeded while persistence was
+  // unavailable. The result: a billing key on Toss with no record in the
+  // database (orphan) — exactly the situation this whole function tries to
+  // prevent. Fail closed with 503 on DB error so a degraded database does
+  // not silently mint untracked Toss billing keys.
+  const { data: existing, error: existingErr } = await supabase
     .from('subscriptions')
     .select('id')
     .eq('user_id', userId)
     .eq('plan_id', plan_id)
     .eq('status', 'active')
     .maybeSingle();
+  if (existingErr) {
+    logEvent('subscription_check_error', {
+      user_id: userId,
+      plan_id,
+      error: existingErr.message,
+    });
+    return jsonResponse({ error: 'subscription_check_unavailable' }, 503);
+  }
   if (existing) {
     logEvent('subscription_duplicate_blocked', { user_id: userId, plan_id });
     return jsonResponse({ error: 'subscription_already_active' }, 409);
