@@ -75,6 +75,23 @@ async function fetchPlans(): Promise<Plan[]> {
   return data as Plan[];
 }
 
+async function fetchPlanById(planId: string): Promise<Plan | null> {
+  // A04: when the admin navigates to /admin/plans?id=<uuid> the form is in
+  // edit mode; the existing values (including external_plan_key) MUST be
+  // pre-filled so a blank submit cannot erase the plan's Toss key. The
+  // upsert RPC coalesces a NULL payload key against the existing column,
+  // so the data stays intact even if the form submission drops the field,
+  // but the UX must not require the admin to retype every value.
+  const supabase = createServiceSupabase();
+  const { data, error } = await supabase
+    .from('plans')
+    .select('id, name, price_cents, interval, external_plan_key')
+    .eq('id', planId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as Plan;
+}
+
 async function upsertPlan(formData: FormData): Promise<void> {
   'use server';
   // A01: the page guard only protects the render path. This Server Action is a
@@ -112,9 +129,20 @@ async function upsertPlan(formData: FormData): Promise<void> {
   }
 }
 
-export default async function AdminPlansPage() {
+export default async function AdminPlansPage({
+  searchParams,
+}: {
+  searchParams?: { id?: string };
+}) {
   await requireAdminOrRedirect();
   const plans = await fetchPlans();
+  // A04: when ?id=<uuid> is provided, the form is in edit mode and the
+  // existing plan's values (including external_plan_key) are pre-filled.
+  // Without this, an admin editing a plan has to re-type every field, and
+  // a blank external_plan_key submit can ONLY be salvaged by the RPC's
+  // coalesce clause — pre-filling makes the data path obvious.
+  const editingId = typeof searchParams?.id === 'string' ? searchParams.id : '';
+  const editing = editingId ? await fetchPlanById(editingId) : null;
 
   return (
     <section>
@@ -126,6 +154,7 @@ export default async function AdminPlansPage() {
             <th>Price (KRW)</th>
             <th>Interval</th>
             <th>Toss plan key</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -135,22 +164,48 @@ export default async function AdminPlansPage() {
               <td>{(p.price_cents / 100).toLocaleString()}</td>
               <td>{p.interval}</td>
               <td>{p.external_plan_key}</td>
+              <td>
+                <a href={`/admin/plans?id=${p.id}`}>Edit</a>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <h2>Add / update plan</h2>
+      <h2>{editing ? `Update plan · ${editing.name}` : 'Add plan'}</h2>
       <form action={upsertPlan}>
-        <input name="id" placeholder="(leave blank to create)" />
-        <input name="name" placeholder="name" required />
-        <input name="price_cents" type="number" min="1" placeholder="price_cents" required />
-        <select name="interval" defaultValue="month">
+        {editing ? (
+          // Edit mode: the id is a hidden input (server-authoritative) and
+          // every other field is pre-filled with the existing values.
+          <input type="hidden" name="id" value={editing.id} />
+        ) : (
+          <input name="id" placeholder="(leave blank to create)" />
+        )}
+        <input
+          name="name"
+          placeholder="name"
+          defaultValue={editing?.name ?? ''}
+          required
+        />
+        <input
+          name="price_cents"
+          type="number"
+          min="1"
+          placeholder="price_cents"
+          defaultValue={editing?.price_cents ?? ''}
+          required
+        />
+        <select name="interval" defaultValue={editing?.interval ?? 'month'}>
           <option value="month">month</option>
           <option value="year">year</option>
         </select>
-        <input name="external_plan_key" placeholder="external_plan_key" />
+        <input
+          name="external_plan_key"
+          placeholder="external_plan_key"
+          defaultValue={editing?.external_plan_key ?? ''}
+        />
         <button type="submit">Save</button>
+        {editing ? <a href="/admin/plans">Cancel</a> : null}
       </form>
     </section>
   );

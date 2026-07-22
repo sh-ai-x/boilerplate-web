@@ -481,3 +481,49 @@ describe('A10 — resilience: timeouts, cleanup, narrow catch', () => {
     expect(LAYOUT).toMatch(/console\.error/);
   });
 });
+
+describe('A04 — admin edit form pre-fills existing values (incl. external_plan_key)', () => {
+  // The admin /admin/plans page renders a single combined add/update form.
+  // When the admin clicks "Edit" on an existing row, the page receives
+  // ?id=<uuid> and the form MUST pre-fill every column — most importantly
+  // external_plan_key, which the Edge Function otherwise relies on. Without
+  // pre-fill, an admin editing name/price has to re-type the Toss plan key,
+  // and a blank submit silently clears it from the database (the RPC's
+  // coalesce clause papers over the data loss, but the UX is broken).
+  it('AdminPlansPage accepts searchParams and looks up the plan by id', () => {
+    expect(PLANS_PAGE).toMatch(/searchParams\?:\s*\{\s*id\?\s*:\s*string\s*\}/);
+    expect(PLANS_PAGE).toMatch(/fetchPlanById\(/);
+    expect(PLANS_PAGE).toMatch(/\.eq\(['"]id['"],\s*planId\)/);
+  });
+  it('form renders Edit link per row that points to /admin/plans?id=<id>', () => {
+    // Each row in the table gets an Edit link so admins can switch the
+    // form into edit mode without retyping the id.
+    expect(PLANS_PAGE).toMatch(/\/admin\/plans\?id=\$\{p\.id\}/);
+  });
+  it('edit mode uses a hidden id input (id is server-authoritative in edit mode)', () => {
+    // The free-text "id" input is only shown in create mode; edit mode
+    // uses a hidden input so the server-side action sees a real uuid.
+    expect(PLANS_PAGE).toMatch(/type="hidden" name="id" value=\{editing\.id\}/);
+  });
+  it('edit mode pre-fills external_plan_key via defaultValue (not value)', () => {
+    // defaultValue is the uncontrolled React prop for pre-filling; using
+    // `value` would freeze the input to the pre-filled string and break
+    // further edits.
+    expect(PLANS_PAGE).toMatch(
+      /name="external_plan_key"[\s\S]*?defaultValue=\{editing\?\.external_plan_key\s*\?\?\s*''\}/
+    );
+  });
+  it('edit mode pre-fills name / price_cents / interval via defaultValue', () => {
+    expect(PLANS_PAGE).toMatch(/defaultValue=\{editing\?\.name\s*\?\?\s*''\}/);
+    expect(PLANS_PAGE).toMatch(/defaultValue=\{editing\?\.price_cents\s*\?\?\s*''\}/);
+    expect(PLANS_PAGE).toMatch(/defaultValue=\{editing\?\.interval\s*\?\?\s*'month'\}/);
+  });
+  it('RPC preserves external_plan_key on blank payload (defense in depth)', () => {
+    // Even if a future regression reintroduced a form that did not pre-fill,
+    // the SQL coalesce() in upsert_plan_with_audit must keep the prior
+    // value so the data path stays safe.
+    expect(MIGRATION_0001).toMatch(
+      /external_plan_key\s*=\s*coalesce\s*\(\s*payload\s*->>\s*'external_plan_key'\s*,\s*external_plan_key\s*\)/
+    );
+  });
+});
