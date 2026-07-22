@@ -60,6 +60,20 @@ function logEvent(event: string, fields: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ event, timestamp: new Date().toISOString(), ...fields }));
 }
 
+// A09/F5: redacts a Toss billing key for centralized logs. Toss billing keys
+// are reusable payment credentials — anyone with the raw key can charge
+// the user. The previous cleanup-failure paths logged the full key in the
+// structured log fields, expanding its blast radius to every log sink
+// (Deno's stdout, Supabase's log aggregator, Sentry-style error trackers).
+// Format: keep the prefix up to the first 3 chars and the last 4 chars;
+// replace the middle with "***". For very short keys, emit a generic
+// placeholder rather than risk revealing too much.
+function redactBillingKey(billingKey: string | null | undefined): string {
+  if (!billingKey || typeof billingKey !== 'string') return '<none>';
+  if (billingKey.length <= 8) return '***';
+  return `${billingKey.slice(0, 3)}***${billingKey.slice(-4)}`;
+}
+
 async function verifyTurnstile(
   token: string,
   secretKey: string,
@@ -229,7 +243,10 @@ async function deleteBillingKey(
     });
     if (!res.ok) {
       status = res.status;
-      logEvent('cleanup_failed', { billing_key: billingKey, status: res.status });
+      logEvent('cleanup_failed', {
+        billing_key: redactBillingKey(billingKey),
+        status: res.status,
+      });
     } else {
       // A10/F5: success path. Do NOT log the billing key on success either —
       // it is a reusable payment credential; even confirmation logs are an
@@ -240,7 +257,10 @@ async function deleteBillingKey(
   } catch (_err) {
     // Cleanup must never throw — the caller is already on the failure path.
     thrownReason = 'delete_request_failed_or_timeout';
-    logEvent('cleanup_failed', { billing_key: billingKey, reason: thrownReason });
+    logEvent('cleanup_failed', {
+      billing_key: redactBillingKey(billingKey),
+      reason: thrownReason,
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -259,7 +279,7 @@ async function deleteBillingKey(
     );
     if (enqErr) {
       logEvent('cleanup_enqueue_failed', {
-        billing_key: billingKey,
+        billing_key: redactBillingKey(billingKey),
         error: enqErr.message,
       });
     } else {
@@ -269,7 +289,9 @@ async function deleteBillingKey(
     // The enqueue itself failed — fall through to the structured log so
     // an operator can manually retry. NEVER throw; cleanup must not
     // escalate a retry failure into a 500 on the original request.
-    logEvent('cleanup_enqueue_threw', { billing_key: billingKey });
+    logEvent('cleanup_enqueue_threw', {
+      billing_key: redactBillingKey(billingKey),
+    });
   }
 }
 

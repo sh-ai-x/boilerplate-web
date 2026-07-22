@@ -377,6 +377,43 @@ describe('A06 — no duplicate active subscriptions', () => {
   });
 });
 
+describe('A09/F5 — raw Toss billing key must NEVER appear in structured logs (F5)', () => {
+  it('declares a redactBillingKey helper that masks the middle of the key', () => {
+    expect(BILLING).toMatch(/function redactBillingKey\(/);
+    // The redaction format keeps a 3-char prefix and a 4-char suffix and
+    // replaces the middle with "***". Operators need enough context to
+    // correlate across logs without seeing the live payment credential.
+    expect(BILLING).toMatch(/\$\{billingKey\.slice\(0,\s*3\)\}\*\*\*\$\{billingKey\.slice\(-4\)\}/);
+  });
+  it('every cleanup_failed log call uses the redacted form (not the raw key)', () => {
+    // Find all logEvent calls that mention cleanup_failed and verify
+    // they reference redactBillingKey(billingKey) rather than the raw key.
+    const cleanupFns = BILLING.match(
+      /logEvent\(\s*'cleanup_failed'[\s\S]*?\);/g
+    );
+    expect(cleanupFns).not.toBeNull();
+    for (const call of cleanupFns!) {
+      expect(call).not.toMatch(/billing_key:\s*billingKey[,}\s]/);
+      expect(call).toMatch(/redactBillingKey\(billingKey\)/);
+    }
+  });
+  it('cleanup_enqueue_failed and cleanup_enqueue_threw also redact', () => {
+    expect(BILLING).toMatch(
+      /logEvent\(\s*'cleanup_enqueue_failed'[\s\S]*?redactBillingKey\(billingKey\)/
+    );
+    expect(BILLING).toMatch(
+      /logEvent\(\s*'cleanup_enqueue_threw'[\s\S]*?redactBillingKey\(billingKey\)/
+    );
+  });
+  it('success path does NOT log the key (no expansion of blast radius)', () => {
+    // The previous code logged the raw key on the success path too. Pin
+    // that the success log line carries no billing-key field.
+    const success = BILLING.match(/logEvent\(\s*'cleanup_succeeded'[\s\S]*?\);/);
+    expect(success).not.toBeNull();
+    expect(success![0]).not.toMatch(/billing_key/);
+  });
+});
+
 describe('A10 — durable retry queue for failed Toss cleanups (F4)', () => {
   const MIGRATION_0003 = read('../supabase/migrations/0003_cleanup_queue.sql');
 
