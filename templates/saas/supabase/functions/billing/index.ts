@@ -388,16 +388,45 @@ Deno.serve(async (req: Request) => {
       .select('id')
       .eq('billing_key', result.billingKey)
       .maybeSingle();
-    const { data: keepKey } = await supabase.rpc('claim_toss_billing_key_cleanup', {
-      p_billing_key: result.billingKey,
-      p_active_subscription_id: existing?.id ?? null,
-    });
-    if (keepKey !== true) {
+    // A10/F2 + F11: the cleanup RPC is the gating decision for a destructive
+    // Toss DELETE. We MUST distinguish three states:
+    //   data=true   -> a row holds this key, KEEP on Toss (winner race)
+    //   data=false  -> no row holds this key, safe to DELETE (orphan)
+    //   data=null OR error -> UNKNOWN, NEVER delete
+    // The previous code destructured ONLY `data` and discarded the `error`
+    // field. A transient DB error made `data` null, the `keepKey !== true`
+    // branch fired, and the shared Toss billing key was deleted from under
+    // the winner's active subscription. Capture and inspect `error` here.
+    const { data: keepKey, error: rpcErr } = await supabase.rpc(
+      'claim_toss_billing_key_cleanup',
+      {
+        p_billing_key: result.billingKey,
+        p_active_subscription_id: existing?.id ?? null,
+      }
+    );
+    if (rpcErr || keepKey === null) {
+      // A10/F2: RPC errored or returned no data - we cannot prove the key
+      // is safe to delete. Fail closed. The key stays on Toss; an operator
+      // can investigate via the structured log. The shared Toss key is the
+      // winner's live payment credential; a wrong delete means the winner
+      // is silently unsubscribed.
+      logEvent('cleanup_rpc_error', {
+        user_id: userId,
+        plan_id,
+        reason: rpcErr ? 'rpc_error' : 'rpc_null_result',
+        error: rpcErr?.message ?? null,
+      });
+      logEvent('subscription_insert_failed', { user_id: userId, plan_id });
+      return jsonResponse({ error: 'subscription_insert_failed' }, 500);
+    }
+    if (keepKey === true) {
+      // A04: a row holds this key (the winner race). Do NOT delete.
+      logEvent('billing_key_kept', { user_id: userId, plan_id, reason: 'cas_winner' });
+    } else {
+      // data === false: RPC confirmed no row holds this key. Safe to delete.
       // A10: best-effort delete so an orphaned Toss key is not left dangling.
       // Cleanup never throws.
       await deleteBillingKey(tossAuth, result.billingKey);
-    } else {
-      logEvent('billing_key_kept', { user_id: userId, plan_id, reason: 'cas_winner' });
     }
     logEvent('subscription_insert_failed', { user_id: userId, plan_id });
     return jsonResponse({ error: 'subscription_insert_failed' }, 500);

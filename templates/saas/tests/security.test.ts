@@ -175,7 +175,11 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
   });
   it('Edge Function only deletes the Toss key when the CAS says it is safe', () => {
     expect(BILLING).toMatch(/claim_toss_billing_key_cleanup/);
-    expect(BILLING).toMatch(/if \(keepKey !== true\)/);
+    // A10/F2: the gating decision is now tri-state, not boolean. The
+    // "keep" branch must be `keepKey === true`; the "delete" branch is
+    // an explicit else. The old `if (keepKey !== true)` allowed a
+    // null/error result to authorize deletion, which is the bug.
+    expect(BILLING).toMatch(/keepKey === true/);
     const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
     expect(insertFail).toMatch(/deleteBillingKey/);
     expect(insertFail).toMatch(/claim_toss_billing_key_cleanup/);
@@ -183,6 +187,8 @@ describe('A04 — atomic CAS billing-key cleanup', () => {
     // excludes the winning row from being marked abandoned.
     expect(insertFail).toMatch(/p_active_subscription_id/);
     expect(insertFail).toMatch(/\.eq\('billing_key'/);
+    // The error/null short-circuit must be in place (F2).
+    expect(insertFail).toMatch(/rpcErr\s*\|\|\s*keepKey\s*===\s*null/);
   });
   it('interval-aware next_bill_at: uses addInterval helper', () => {
     expect(BILLING).toMatch(/function addInterval\(d: Date, interval:/);
@@ -368,6 +374,48 @@ describe('A06 — no duplicate active subscriptions', () => {
     expect(BILLING).toMatch(/subscription_already_active/);
     expect(BILLING).toMatch(/idempotencyKey = `billing:\$\{userId\}:\$\{plan_id\}`/);
     expect(BILLING).not.toMatch(/'idempotency-key':\s*crypto\.randomUUID\(\)[\s\S]*TOSS_CONFIRM_URL/);
+  });
+});
+
+describe('A10 — cleanup RPC error handling (F2)', () => {
+  it('destructures BOTH `data` AND `error` from the .rpc() call', () => {
+    // The cleanup RPC is the gating decision for a destructive Toss DELETE.
+    // Any non-true value previously authorized deletion — including the case
+    // where the RPC errored out (DB connection lost, RLS issue, function
+    // raised) and returned data=null. Capture the error explicitly.
+    const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
+    expect(insertFail).toMatch(/const\s*\{\s*data:\s*keepKey\s*,\s*error:\s*rpcErr\s*\}/);
+  });
+  it('RPC error path fails closed (NEVER authorizes deletion)', () => {
+    // When rpcErr is set OR data is null, the function must NOT call
+    // deleteBillingKey. The shared Toss billing key belongs to the winner
+    // in the race; a wrong delete silently unsubscribes them.
+    const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
+    // The error/null short-circuit must appear BEFORE the deleteBillingKey call.
+    const errorGuardIdx = insertFail.indexOf('rpcErr || keepKey === null');
+    const deleteIdx = insertFail.indexOf('deleteBillingKey');
+    expect(errorGuardIdx).toBeGreaterThan(0);
+    expect(deleteIdx).toBeGreaterThan(0);
+    expect(errorGuardIdx).toBeLessThan(deleteIdx);
+    // The short-circuit must return early (no fallthrough into deleteBillingKey).
+    expect(insertFail).toMatch(/rpcErr\s*\|\|\s*keepKey\s*===\s*null[\s\S]*?return\s+jsonResponse/);
+  });
+  it('data === false authorizes deletion (no row holds the key = orphan)', () => {
+    // Pin the happy path: when the RPC confirms no row holds this key, the
+    // caller deletes the orphan on Toss. This is the only branch where
+    // deleteBillingKey may run.
+    const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
+    expect(insertFail).toMatch(/keepKey === true[\s\S]*?logEvent\('billing_key_kept'/);
+    expect(insertFail).toMatch(/deleteBillingKey\(tossAuth,\s*result\.billingKey\)/);
+    // The kept branch (keepKey === true) must appear BEFORE the delete branch.
+    expect(insertFail.indexOf("logEvent('billing_key_kept'"))
+      .toBeLessThan(insertFail.indexOf('deleteBillingKey('));
+  });
+  it('RPC error is logged via the structured logger (no raw error throw)', () => {
+    const insertFail = BILLING.slice(BILLING.indexOf('if (subErr || !sub)'));
+    expect(insertFail).toMatch(/logEvent\('cleanup_rpc_error'/);
+    // The error message must be stringified, not thrown as-is.
+    expect(insertFail).toMatch(/rpcErr\?\.message\s*\?\?\s*null/);
   });
 });
 
