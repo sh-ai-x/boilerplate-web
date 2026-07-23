@@ -3,27 +3,28 @@
 extract-verdict.py — extract the LLM review/security verdict from
 anthropics/claude-code-action@v1's output file.
 
-ROOT-CAUSE FIX: the previous post-script extracted the verdict by grepping
-PR comments for "Verdict: <value>". That works ONLY when the agent
-actually posts a comment with a "Verdict:" line. When the agent posts an
-inline comment (mcp__github_inline_comment) or no comment at all, the
-post-script falls back to a stale comment from a previous run, causing
-the severity gate to flip-flop between Approve / Changes Requested /
+ROOT-CAUSE FIX (issue #244, boilerplate-web PR #17/#19): the previous
+post-script extracted the verdict by grepping PR comments for
+"Verdict: <value>". That works ONLY when the agent actually posts a
+comment with a "Verdict:" line. When the agent posts an inline comment
+(mcp__github_inline_comment) or no comment at all, the post-script
+falls back to a stale comment from a previous run, causing the
+severity gate to flip-flop between Approve / Changes Requested /
 Blocked on every push.
 
 This script reads the agent's full output (saved by the action to
-/home/runner/work/_temp/claude-execution-output.json or
-$RUNNER_TEMP/claude-execution-output.json) and extracts the LAST
-assistant text that contains "Verdict: <value>". The action's output
-is a JSON-lines stream of messages (init, user, assistant, result,
-etc.). The assistant messages contain the model's text output; the
-verdict appears in the FINAL assistant message per the prompt
+$RUNNER_TEMP/claude-execution-output.json or
+/home/runner/work/_temp/claude-execution-output.json) and extracts the
+LAST assistant text that contains "Verdict: <value>". The action's
+output is a JSON-lines stream of messages (init, user, assistant,
+result, etc.). The assistant messages contain the model's text output;
+the verdict appears in the FINAL assistant message per the prompt
 contract.
 
 Robustness:
 - If the file is missing, exits 0 with no output (caller falls back).
-- If the file is HTML (e.g. 404 from a redirect), exits 0 with no output
-  (caller falls back). Detected by checking the first non-blank
+- If the file is HTML (e.g. 404 from a redirect), exits 0 with no
+  output (caller falls back). Detected by checking the first non-blank
   character.
 - If the file is JSON but has no Verdict, exits 0 with no output.
 - If the file is unreadable, exits 0 with no output (caller falls back).
@@ -33,10 +34,11 @@ Robustness:
 Usage:
   python3 extract-verdict.py <path-to-claude-execution-output.json>
 
-Prints the verdict (Approve|Blocked|Changes Requested) to stdout if found.
-Exits 0 always (no verdict on stdout = caller falls back).
+Prints the verdict (Approve|Blocked|Changes Requested) to stdout if
+found. Exits 0 always (no verdict on stdout = caller falls back).
 """
 from __future__ import annotations
+
 import json
 import re
 import sys
@@ -78,8 +80,9 @@ def extract(path: Path) -> str:
             continue
         if msg.get("type") != "assistant":
             continue
-        # Content can be in `message.content` (list of content blocks, claude-code SDK)
-        # or directly in `content` (string, some wrappers).
+        # Content can be in `message.content` (list of content blocks,
+        # claude-code SDK) or directly in `content` (string, some
+        # wrappers).
         content = msg.get("message", {}).get("content")
         if content is None:
             content = msg.get("content")
