@@ -1,9 +1,9 @@
 
 export const dynamic = 'force-dynamic';
 import { redirect } from 'next/navigation';
-import { createServerSupabase } from '@boilerplate-web/shared/supabase';
-import { createServiceSupabase } from '@boilerplate-web/shared/supabase';
 import { cookies } from 'next/headers';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createServiceSupabase } from '@boilerplate-web/shared/supabase';
 
 interface Plan {
   id: string;
@@ -13,12 +13,43 @@ interface Plan {
   external_plan_key: string | null;
 }
 
-async function requireAdminOrRedirect(): Promise<void> {
+// A07: the shared createServerSupabase() helper built a bare @supabase/supabase-js
+// client that never read request cookies, so auth.getUser() could not resolve the
+// caller's session and every admin page redirected. The cookie-backed
+// @supabase/ssr createServerClient is what actually threads the request's auth
+// cookie into Supabase auth storage.
+function getSupabaseForRequest() {
   const cookieStore = cookies();
-  const supabase = createServerSupabase({
-    get: (n) => cookieStore.get(n),
-    set: (n, v, o) => cookieStore.set(n, v, o as never),
-  });
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value;
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value, ...options });
+          } catch (_err) {
+            // Server Components cannot set cookies. Server Action path uses a
+            // separate request where set() is allowed; this is non-fatal.
+          }
+        },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value: '', ...options });
+          } catch (_err) {
+            // See note above.
+          }
+        },
+      },
+    }
+  );
+}
+
+async function requireAdminOrRedirect(): Promise<void> {
+  const supabase = getSupabaseForRequest();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/');
   const role = (user.app_metadata as { role?: string } | null)?.role;
@@ -40,11 +71,7 @@ async function upsertPlan(formData: FormData): Promise<void> {
   // A01: the page guard only protects the render path. This Server Action is a
   // separately-invokable endpoint, so it MUST re-derive the caller from the
   // request cookie store and assert admin BEFORE any service-role mutation.
-  const cookieStore = cookies();
-  const authClient = createServerSupabase({
-    get: (n) => cookieStore.get(n),
-    set: (n, v, o) => cookieStore.set(n, v, o as never),
-  });
+  const authClient = getSupabaseForRequest();
   const { data: { user } } = await authClient.auth.getUser();
   const role = (user?.app_metadata as { role?: string } | null)?.role;
   if (!user || role !== 'admin') {
@@ -60,28 +87,20 @@ async function upsertPlan(formData: FormData): Promise<void> {
     external_plan_key: String(formData.get('external_plan_key') ?? '') || null,
   };
 
-  // Capture prior state so the audit trail records a full before/after diff.
-  let before: Plan | null = null;
-  if (id) {
-    const { data: prior } = await supabase
-      .from('plans')
-      .select('id, name, price_cents, interval, external_plan_key')
-      .eq('id', id)
-      .maybeSingle();
-    before = (prior as Plan) ?? null;
-    await supabase.from('plans').update(payload).eq('id', id);
-  } else {
-    await supabase.from('plans').insert(payload);
-  }
-
-  // A09: privileged price / external-plan-key mutations must leave an
-  // actor-attributed audit record. Written via the service-role client.
-  await supabase.from('audit_log').insert({
+  // A09: plan upsert + audit insert MUST be a single database transaction.
+  // Calling .update()/.insert() then .from('audit_log').insert() separately
+  // means a service-role failure between the two would leave the audit trail
+  // silent (privileged mutation recorded nowhere). upsert_plan_with_audit()
+  // wraps both in one plpgsql block and returns the audit row id, so we get
+  // atomicity + a single round-trip.
+  const { error: rpcErr } = await supabase.rpc('upsert_plan_with_audit', {
     actor_id: user.id,
-    action: 'plans.upsert',
-    before,
-    after: payload,
+    plan_id_in: id ?? null,
+    payload,
   });
+  if (rpcErr) {
+    throw new Error(`upsert_plan_with_audit failed: ${rpcErr.message}`);
+  }
 }
 
 export default async function AdminPlansPage() {

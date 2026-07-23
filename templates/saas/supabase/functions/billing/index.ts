@@ -29,15 +29,29 @@ interface BillingRequest {
   plan_id: string;
   customer_key: string;
   turnstile_token: string;
+  // A07: authKey is the single-use token returned by the client-side Toss
+  // card-auth flow. Toss /v1/billing/authorizations/issue requires it; the
+  // previous body omitted it, so every call was rejected as malformed.
+  auth_key: string;
   // NOTE: any extra `amount` / `price` field here is IGNORED on purpose.
   // NOTE: `customer_key` is validated for schema-compat but NEVER trusted as
   // the provider customerKey — that is derived from the authenticated user.
 }
 
+// A05: CORS — every response (including error paths) must echo the allowed
+// origin + methods, otherwise the browser blocks the response and the user
+// sees a CORS error in the console instead of the real failure reason.
+const CORS_HEADERS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'POST, OPTIONS',
+  'access-control-allow-headers': 'authorization, content-type, apikey, x-client-info',
+  'access-control-max-age': '86400',
+};
+
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...CORS_HEADERS },
   });
 }
 
@@ -68,28 +82,32 @@ async function verifyTurnstile(token: string, secretKey: string): Promise<boolea
   }
 }
 
+type PlanInterval = 'month' | 'year';
+
 async function fetchPlan(
   supabase: ReturnType<typeof createClient>,
   planId: string
-): Promise<{ price_cents: number; external_plan_key: string } | null> {
-  // supabase-js: equivalent of SELECT price_cents, external_plan_key FROM plans WHERE id = $1
+): Promise<{ price_cents: number; external_plan_key: string; interval: PlanInterval } | null> {
+  // supabase-js: equivalent of SELECT price_cents, external_plan_key, interval
+  // FROM plans WHERE id = $1
   const { data, error } = await supabase
     .from('plans')
-    .select('price_cents, external_plan_key')
+    .select('price_cents, external_plan_key, interval')
     .eq('id', planId)
     .single();
   if (error || !data) return null;
   return {
     price_cents: data.price_cents as number,
     external_plan_key: data.external_plan_key as string,
+    interval: (data.interval as PlanInterval) ?? 'month',
   };
 }
 
 async function issueBillingKey(args: {
   auth: string;
   customerKey: string;
+  authKey: string;
   planKey: string;
-  amount: number;
   idempotencyKey: string;
 }): Promise<{ billingKey: string } | { error: string }> {
   // A10: 10s timeout + top-level catch around the Toss call.
@@ -106,9 +124,12 @@ async function issueBillingKey(args: {
         'idempotency-key': args.idempotencyKey,
       },
       body: JSON.stringify({
+        // A07: Toss /v1/billing/authorizations/issue expects customerKey +
+        // authKey + plan. The amount is set when BILLING the key (separate
+        // endpoint), NOT at issue time, so we no longer send amount/orderId
+        // in this body.
         customerKey: args.customerKey,
-        amount: { value: args.amount, currency: 'KRW' },
-        orderId: args.idempotencyKey,
+        authKey: args.authKey,
         plan: args.planKey,
       }),
       signal: ctrl.signal,
@@ -146,18 +167,29 @@ async function deleteBillingKey(auth: string, billingKey: string): Promise<void>
 }
 
 Deno.serve(async (req: Request) => {
+  // A05: browser preflight. Without an OPTIONS branch the browser never gets
+  // past preflight and the user sees a generic CORS error in DevTools.
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
   if (req.method !== 'POST') {
     return jsonResponse({ error: 'method_not_allowed' }, 405);
   }
 
-  let body: Partial<BillingRequest>;
+  let body: unknown;
   try {
     body = await req.json();
   } catch (_) {
     return jsonResponse({ error: 'invalid_json' }, 400);
   }
+  // A10: req.json() returns any JSON value, including null / arrays / primitives.
+  // The next line destructures body, so a null body crashes with a 500 instead
+  // of producing a clean 400. Validate the shape BEFORE destructuring.
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    return jsonResponse({ error: 'invalid_body' }, 400);
+  }
 
-  const { plan_id, customer_key, turnstile_token } = body;
+  const { plan_id, customer_key, turnstile_token, auth_key } = body as Partial<BillingRequest>;
   if (!plan_id || typeof plan_id !== 'string') {
     return jsonResponse({ error: 'missing plan_id' }, 400);
   }
@@ -166,6 +198,9 @@ Deno.serve(async (req: Request) => {
   }
   if (!turnstile_token || typeof turnstile_token !== 'string') {
     return jsonResponse({ error: 'missing turnstile_token' }, 400);
+  }
+  if (!auth_key || typeof auth_key !== 'string') {
+    return jsonResponse({ error: 'missing auth_key' }, 400);
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
@@ -230,8 +265,8 @@ Deno.serve(async (req: Request) => {
   const result = await issueBillingKey({
     auth: tossAuth,
     customerKey: customerKey,
+    authKey: auth_key,
     planKey: plan.external_plan_key,
-    amount: plan.price_cents,
     idempotencyKey: idempotencyKey,
   });
   if ('error' in result) {
@@ -239,8 +274,15 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: result.error }, 502);
   }
 
+  // A04: next-bill date must respect the plan's interval. The previous
+  // implementation hard-coded +1 month, so a yearly plan was scheduled to
+  // bill again in 30 days (12x oversell). Branch on plan.interval.
   const nextBill = new Date();
-  nextBill.setMonth(nextBill.getMonth() + 1);
+  if (plan.interval === 'year') {
+    nextBill.setFullYear(nextBill.getFullYear() + 1);
+  } else {
+    nextBill.setMonth(nextBill.getMonth() + 1);
+  }
   const { data: sub, error: subErr } = await supabase
     .from('subscriptions')
     .insert({
@@ -253,9 +295,22 @@ Deno.serve(async (req: Request) => {
     .select('id')
     .single();
   if (subErr || !sub) {
-    // A10: the Toss billing key is now orphaned — best-effort delete so it is
-    // not left dangling on the provider side. Cleanup never throws.
-    await deleteBillingKey(tossAuth, result.billingKey);
+    // A04: a concurrent request may have inserted an active subscription for
+    // the same (user, plan) and grabbed the Toss billing key first (or the
+    // idempotency-key reuse means our key IS in the DB under someone else's
+    // row). Atomically check: if our key is referenced, KEEP it on Toss;
+    // otherwise it is safe to delete. The check + abandon-mark happen in a
+    // single statement so the unique-index loser cannot delete the winner.
+    const { data: keepKey } = await supabase.rpc('claim_toss_billing_key_cleanup', {
+      p_billing_key: result.billingKey,
+    });
+    if (keepKey !== true) {
+      // A10: best-effort delete so an orphaned Toss key is not left dangling.
+      // Cleanup never throws.
+      await deleteBillingKey(tossAuth, result.billingKey);
+    } else {
+      logEvent('billing_key_kept', { user_id: userId, plan_id, reason: 'cas_winner' });
+    }
     logEvent('subscription_insert_failed', { user_id: userId, plan_id });
     return jsonResponse({ error: 'subscription_insert_failed' }, 500);
   }

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@boilerplate-web/shared": "workspace:*",
+    "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
     "next": "^14.2.13",
     "react": "^18.3.1",
