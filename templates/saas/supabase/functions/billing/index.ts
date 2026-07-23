@@ -301,15 +301,23 @@ Deno.serve(async (req: Request) => {
     // row). Atomically check: if our key is referenced, KEEP it on Toss;
     // otherwise it is safe to delete. The check + abandon-mark happen in a
     // single statement so the unique-index loser cannot delete the winner.
+    // The RPC returns a tri-state: 'true' (winner has the key — KEEP it),
+    // 'false' (no row has the key — safe to delete), 'error' (RPC failed —
+    // do NOT delete; the key state is unknown).
     const { data: keepKey } = await supabase.rpc('claim_toss_billing_key_cleanup', {
       p_billing_key: result.billingKey,
+      p_active_subscription_id: null,  // our insert failed, so we have no id to pass
     });
-    if (keepKey !== true) {
+    if (keepKey === 'false') {
       // A10: best-effort delete so an orphaned Toss key is not left dangling.
       // Cleanup never throws.
       await deleteBillingKey(tossAuth, result.billingKey);
-    } else {
+    } else if (keepKey === 'true') {
       logEvent('billing_key_kept', { user_id: userId, plan_id, reason: 'cas_winner' });
+    } else {
+      // 'error' or null/undefined — RPC failed. Do NOT delete; the key state
+      // is unknown. Log so the orphan key is visible in the audit trail.
+      logEvent('billing_cleanup_unknown', { user_id: userId, plan_id, keep_key: keepKey });
     }
     logEvent('subscription_insert_failed', { user_id: userId, plan_id });
     return jsonResponse({ error: 'subscription_insert_failed' }, 500);
