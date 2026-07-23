@@ -79,39 +79,80 @@ alter table public.audit_log enable row level security;
 
 
 -- ---------------------------------------------------------------------------
--- claim_toss_billing_key_cleanup() — A04 atomic CAS for billing-key cleanup.
+-- claim_toss_billing_key_cleanup() — A04 existence check for billing-key cleanup.
 --
--- Called by the Edge Function after a failed subscriptions INSERT. Returns
--- TRUE if THIS function's billing_key is still referenced in subscriptions
--- (a concurrent request won the race, so the Toss key must NOT be deleted —
--- it is the winner's key). Returns FALSE if no row has this billing_key
--- (the orphan is safe to delete from Toss).
+-- Called by the Edge Function after a failed subscriptions INSERT.
+--   returns 'true'  => some row in public.subscriptions holds THIS billing_key
+--                      (a concurrent request won the race and inserted first;
+--                      the Toss key is the winner's, so do NOT delete it).
+--   returns 'false' => no row holds this billing_key (the Toss key is an
+--                      orphan and is safe to delete).
+--   returns 'error' => an exception was raised inside the function (table
+--                      missing, connection lost, RLS issue, etc.). The
+--                      caller MUST treat this as UNKNOWN and NEVER delete
+--                      the shared Toss key. A wrong delete in this state
+--                      would destroy the winner's live payment credential.
 --
--- SECURITY DEFINER + locked search_path so the Edge Function can call it via
--- the service-role client without granting the anon role any extra privileges.
+-- A10/F11: this is the third state. The previous function returned boolean
+-- and silently conflated 'false' (intentional — orphan) with 'error'
+-- (accidental — could not determine state). The caller then authorized
+-- deletion in both cases, destroying the winner's billing key under a
+-- transient DB failure. The TEXT tri-state ('true'|'false'|'error')
+-- makes the contract explicit at both ends.
+--
+-- This is a READ-ONLY existence check, not a destructive UPDATE. The previous
+-- implementation did an UPDATE marking rows abandoned, which had two defects:
+--   1) In the winner-exists race (Scenario A in the A04 regression test) the
+--      WHERE clause `id is distinct from p_active_subscription_id` excluded
+--      the winner's row, so the UPDATE matched ZERO rows, returning v_id IS
+--      NULL => FALSE. The Edge Function then DELETED the Toss key the winner
+--      still depends on — exactly the bug we are trying to prevent.
+--   2) When p_active_subscription_id was NULL, the WHERE clause could mark
+--      another user's row abandoned as a side effect (data corruption).
+--
+-- p_active_subscription_id is kept on the signature so existing callers do
+-- not break, but it is intentionally unused by the new implementation.
 -- ---------------------------------------------------------------------------
-create or replace function public.claim_toss_billing_key_cleanup(p_billing_key text)
-returns boolean
+create or replace function public.claim_toss_billing_key_cleanup(
+  p_billing_key text,
+  p_active_subscription_id uuid
+)
+returns text
 language plpgsql
 security definer
+stable
 set search_path = ''
 as $$
 declare
-  v_id uuid;
+  v_exists boolean;
 begin
-  update public.subscriptions
-     set status = 'abandoned', updated_at = now()
-   where billing_key = p_billing_key
-   returning id into v_id;
+  if p_billing_key is null or length(p_billing_key) = 0 then
+    return 'error';
+  end if;
 
-  -- true  => our key is in the DB; do NOT delete (winner depends on it).
-  -- false => no row has our key; safe to delete from Toss.
-  return v_id is not null;
+  select exists (
+    select 1
+    from public.subscriptions
+    where billing_key = p_billing_key
+  ) into v_exists;
+
+  if v_exists then
+    return 'true';
+  else
+    return 'false';
+  end if;
+exception when others then
+  -- A10/F11: catch ANY exception and surface as 'error'. The caller treats
+  -- 'error' as UNKNOWN and refuses to delete the shared Toss key. Without
+  -- this catch, a transient DB issue would raise to supabase-js, and the
+  -- caller would see error=null + data=null — ambiguous between "cancelled
+  -- job" and "RPC errored". The explicit 'error' return closes that gap.
+  return 'error';
 end;
 $$;
 
-revoke all on function public.claim_toss_billing_key_cleanup(text) from public;
-grant execute on function public.claim_toss_billing_key_cleanup(text) to service_role;
+revoke all on function public.claim_toss_billing_key_cleanup(text, uuid) from public;
+grant execute on function public.claim_toss_billing_key_cleanup(text, uuid) to service_role;
 
 
 -- ---------------------------------------------------------------------------
@@ -154,7 +195,15 @@ begin
        set name              = payload ->> 'name',
            price_cents       = (payload ->> 'price_cents')::int,
            interval          = payload ->> 'interval',
-           external_plan_key = payload ->> 'external_plan_key',
+           -- A04/A09: preserve external_plan_key if the caller did not
+           -- supply it. The admin edit form does not pre-fill the field
+           -- (single combined add/update form keyed only by an `id`
+           -- input), so a blank submit would otherwise overwrite an
+           -- existing Toss plan key with NULL -- silently breaking
+           -- every subscriber on that plan the next time billing runs.
+           -- coalesce(payload key, existing column) keeps the prior
+           -- value when the JSON payload's key is missing or null.
+           external_plan_key = coalesce(payload ->> 'external_plan_key', external_plan_key),
            updated_at        = now()
      where id = plan_id_in;
   else
