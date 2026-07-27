@@ -884,27 +884,66 @@ jobs:
           # `agent_ran=false` is the unambiguous signal. Defaulting to
           # Approve on empty verdict in this case masked the skip as a
           # silent pass (the bootstrap-PR / PR-modifies-workflow scenario).
-          # Hard-fail with a remediation message so the user knows to merge
-          # the workflow change first and re-push from a clean branch.
+          #
+          # Differentiate the two `agent_ran=false` paths:
+          #   (a) PR modifies .github/workflows/* -> bootstrap case (the
+          #       agent cannot review its own workflow changes by design).
+          #       The Extract step's workflow-fallback branch already
+          #       posted an "Action required: manual review" comment on
+          #       the PR; warn + pass so the human gate (branch
+          #       protection / REVIEW_REQUIRED) is what actually blocks
+          #       merge. No install problem to surface.
+          #   (b) PR does NOT modify .github/workflows/* -> the agent's
+          #       "no output file" path (default-approve-no-file). This
+          #       is the canonical install-broken signature from issue
+          #       #212-C1: hard-fail with the remediation message.
           if [ "$R_AGENT" = "false" ] || [ "$S_AGENT" = "false" ]; then
+            pr_touches_workflow="$(
+              gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/files?per_page=100" \
+                --jq '[.[] | select(.filename | startswith(".github/workflows/"))] | length' \
+                2>/dev/null || echo 0
+            )"
+            pr_touches_workflow="${pr_touches_workflow:-0}"
+            echo "pr_touches_workflow=${pr_touches_workflow}"
+            if [ "${pr_touches_workflow}" -gt 0 ]; then
+              {
+                echo "::warning::review+security gate: AI agent was skipped because this PR modifies .github/workflows/* (bootstrap case; claude-code-action's workflow-validation guard refuses to review its own workflow changes)"
+                echo "  review.agent_ran=$R_AGENT verdict=$R"
+                echo "  security.agent_ran=$S_AGENT verdict=$S"
+                echo "  Treating as Approve + warning. The human gate (branch protection / REVIEW_REQUIRED) is what blocks merge, not this agent verdict. The PR author's manual review of the workflow change is required."
+              } >&2
+              [ -z "$R" ] && R="Approve"
+              [ -z "$S" ] && S="Approve"
+              rank() { case "$1" in Blocked) echo 2 ;; "Changes"*) echo 1 ;; Approve) echo 0 ;; *) echo 99 ;; esac; }
+              r=$(rank "$R"); s=$(rank "$S")
+              worst=$([ "$r" -ge "$s" ] && echo "$R" || echo "$S")
+              echo "Combined worst verdict (bootstrap-PR tolerated): $worst"
+              case "$worst" in
+                Approve) exit 0 ;;
+                "Changes"*) echo "::error::Changes Requested (review=$R security=$S)"; exit 1 ;;
+                Blocked) echo "::error::Blocked (review=$R security=$S)"; exit 1 ;;
+                *) echo "::warning::Unparseable verdict '$worst' (review='$R' security='$S') on bootstrap-PR; treating as Approve."; exit 0 ;;
+              esac
+            fi
             {
               echo "::error::review+security gate: AI agent was skipped"
               echo "  review.agent_ran=$R_AGENT verdict=$R"
               echo "  security.agent_ran=$S_AGENT verdict=$S"
               echo
-              echo "  anthropics/claude-code-action@v1 refused to run on this PR."
-              echo "  The action refuses any PR whose head differs from the"
-              echo "  default branch under .github/workflows/*. Result is"
-              echo "  success (exit-0), but no claude[bot] comment was posted"
-              echo "  -- the 'Approve' verdict in the gate was the empty-verdict"
-              echo "  tolerance, NOT an actual AI review."
+              echo "  anthropics/claude-code-action@v1 refused to run on this PR,"
+              echo "  but the PR does NOT modify .github/workflows/*. The"
+              echo "  workflow-validation guard is not the cause -- this is the"
+              echo "  canonical install-broken signature (issue #212-C1:"
+              echo "  DEV_KIT_GITHUB_TOKEN missing, action rate-limit, plugin"
+              echo "  install failure, transient network error)."
               echo
               echo "  Fix:"
-              echo "    1. Merge this PR's workflow changes to main first."
-              echo "    2. Re-open or sync from the updated default branch."
-              echo "    3. Future PRs (without workflow modifications) will run"
-              echo "       the agent normally and post real verdicts + inline"
-              echo "       comments."
+              echo "    1. Check the 'Install dev-kit plugin' step in the review"
+              echo "       and security jobs for install errors."
+              echo "    2. Confirm DEV_KIT_GITHUB_TOKEN, MINIMAX_API_KEY,"
+              echo "       ANTHROPIC_API_KEY, DEEPSEEK_API_KEY secrets are set"
+              echo "       and not expired."
+              echo "    3. Re-run the workflow (workflow_dispatch or a new push)."
             } >&2
             exit 1
           fi
