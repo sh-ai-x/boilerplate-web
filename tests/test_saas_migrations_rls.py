@@ -1,0 +1,295 @@
+"""Regression tests for templates/saas/supabase/migrations/*.sql.
+
+Pin the schema-level invariants the security review on PR #30 flagged:
+
+  A01 - admin RLS policies MUST gate on auth.app_role(), never on
+        auth.jwt()->>'role'. The latter is the PostgREST role
+        ('authenticated' / 'anon' / 'service_role') and would NEVER
+        match 'admin', silently breaking every admin write.
+
+  A06 - every table referenced in a CREATE POLICY must exist by the
+        time the policy is created. 0002_audit_log.sql installs a
+        SELECT policy on public.audit_log, so public.audit_log MUST
+        be created in 0001_init.sql (a migration that runs second on
+        a fresh DB cannot rely on a sibling migration's CREATE TABLE).
+
+  A06 - auth.app_role() must exist by the time any policy uses it.
+        Defined in 0001_init.sql so plans_admin_write (which is also
+        in 0001) can resolve it.
+
+Background: PR #26's gate rubber-stamped 'Verdict: Blocked' (14
+findings, 3 critical) on the agent's verdict while the file parser
+silently returned ""; PR #30 inherits the same template and was
+flagged with three BLOCKING findings - a missing audit_log table,
+the wrong role check in plans RLS, and an undefined audit-write
+surface. These tests pin the corrected schema so future migrations
+cannot regress.
+
+No mocks. Reads the SQL files as text, parses the create_table /
+create_function / create_policy statements with regex, and asserts
+on file order + content.
+"""
+from __future__ import annotations
+
+import re
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MIGRATIONS = REPO_ROOT / "templates" / "saas" / "supabase" / "migrations"
+
+
+def _migration(name: str) -> str:
+    return (MIGRATIONS / name).read_text()
+
+
+class TestSaasMigrationsRLS(unittest.TestCase):
+    """A01/A06 regression pins for PR #30.
+
+    Each test asserts ONE invariant on the migration file(s). The
+    order tests below assert that a CREATE TABLE / CREATE FUNCTION
+    appears before every CREATE POLICY / USING clause that depends
+    on it, so a fresh DB applying these migrations in lexicographic
+    order never sees an 'undefined relation' or 'function does not
+    exist' error.
+    """
+
+    # --- A01: no plans_admin_write-style RLS check on auth.jwt()->>'role' ----
+
+    def test_no_jwt_top_level_role_in_rls_usings(self) -> None:
+        """No policy in any migration may gate admin access on
+        auth.jwt() ->> 'role'. That claim is the PostgREST role,
+        NOT the app metadata role.
+        """
+        offenders = []
+        for sql_path in sorted(MIGRATIONS.glob("*.sql")):
+            text = sql_path.read_text()
+            # Strip line comments before matching so we don't trip
+            # on the rationale block in the header.
+            stripped = re.sub(r"--.*$", "", text, flags=re.MULTILINE)
+            for m in re.finditer(
+                r"auth\.jwt\(\)\s*->>\s*'role'",
+                stripped,
+            ):
+                line_no = stripped[: m.start()].count("\n") + 1
+                offenders.append((sql_path.name, str(line_no), m.group(0)))
+        self.assertEqual(
+            offenders,
+            [],
+            "auth.jwt()->>'role' is the PostgREST role, not the app "
+            "role. Use auth.app_role() instead. Offending matches: "
+            + ", ".join(f"{f}:{ln}:{tok}" for f, ln, tok in offenders),
+        )
+
+    def test_app_role_used_for_admin_write_policies(self) -> None:
+        """Every USING clause that compares to 'admin' must call
+        auth.app_role(), not auth.jwt() directly. This is the
+        fix's positive half - pin that the new helper is in use.
+        """
+        first = _migration("0001_init.sql")
+        n = first.count("auth.app_role() = 'admin'")
+        self.assertGreaterEqual(
+            n,
+            4,
+            f"expected >= 4 auth.app_role() = 'admin' usages in 0001, got {n}",
+        )
+        second = _migration("0002_audit_log.sql")
+        n2 = second.count("auth.app_role() = 'admin'")
+        self.assertGreaterEqual(
+            n2,
+            1,
+            f"expected >= 1 auth.app_role() usage in 0002, got {n2}",
+        )
+
+    # --- A06: tables referenced by policies MUST exist in an earlier file ----
+
+    def test_audit_log_table_created_in_0001(self) -> None:
+        """0002 installs a SELECT policy on public.audit_log, so
+        0001 (the file that runs first) MUST create the table.
+        Otherwise a fresh DB applying these migrations in order
+        fails on the policy's table reference.
+        """
+        first = _migration("0001_init.sql")
+        self.assertRegex(
+            first,
+            r"create table if not exists public\.audit_log",
+            "0001_init.sql must CREATE TABLE public.audit_log "
+            "before 0002's policy can attach",
+        )
+
+    def test_app_role_function_defined_in_0001(self) -> None:
+        """plans_admin_write (in 0001) calls auth.app_role(), so
+        the function definition must live in 0001 as well.
+        """
+        first = _migration("0001_init.sql")
+        self.assertRegex(
+            first,
+            r"create or replace function auth\.app_role\(\)",
+            "0001_init.sql must define auth.app_role() before "
+            "plans_admin_write references it",
+        )
+
+    def test_0002_has_no_create_table(self) -> None:
+        """0002's header explicitly says 'no CREATE TABLE of
+        existing objects (the tables are owned by 0001_init.sql)'.
+        Pin that contract.
+        """
+        second = _migration("0002_audit_log.sql")
+        stripped = re.sub(r"--.*$", "", second, flags=re.MULTILINE)
+        self.assertNotRegex(
+            stripped,
+            r"create table\b",
+            "0002_audit_log.sql is ADDITIVE only - table CREATE "
+            "statements belong in 0001_init.sql",
+        )
+
+    def test_0002_no_longer_defines_app_role(self) -> None:
+        """auth.app_role() lives in 0001_init.sql (because plans
+        admin RLS needs it). 0002 must NOT redefine it - Postgres
+        treats 'create or replace' as a no-op on identical bodies,
+        but if either file ever drifts the migration set will
+        silently bifurcate. Pin single source of truth.
+        """
+        second = _migration("0002_audit_log.sql")
+        self.assertNotRegex(
+            second,
+            r"create or replace function auth\.app_role",
+            "auth.app_role() is owned by 0001_init.sql; 0002 must "
+            "only consume it via the audit_log SELECT policy",
+        )
+
+    # --- cross-file ordering invariant -------------------------------------
+
+    def test_create_table_before_create_policy_ordering(self) -> None:
+        """For every (table, file) pair where file contains a
+        CREATE POLICY on public.<table>, at least one EARLIER
+        migration file (lex order) must contain a CREATE TABLE
+        for public.<table>. This is a static cross-file check
+        that catches the original bug class ('policy on table
+        that is never created').
+        """
+        files = sorted(MIGRATIONS.glob("*.sql"))
+        table_to_first_create = {}
+        for sql_path in files:
+            stripped = re.sub(
+                r"--.*$", "", sql_path.read_text(), flags=re.MULTILINE
+            )
+            for m in re.finditer(
+                r"create table if not exists public\.(\w+)",
+                stripped,
+            ):
+                tbl = m.group(1)
+                table_to_first_create.setdefault(tbl, sql_path.name)
+        # Now scan every file's policies and confirm each referenced
+        # table has an earlier-or-equal create.
+        offenders = []
+        for sql_path in files:
+            stripped = re.sub(
+                r"--.*$", "", sql_path.read_text(), flags=re.MULTILINE
+            )
+            for m in re.finditer(
+                r'create policy\s+"[^"]+"\s+on public\.(\w+)',
+                stripped,
+            ):
+                tbl = m.group(1)
+                creator = table_to_first_create.get(tbl)
+                if creator is None:
+                    offenders.append(
+                        f"{sql_path.name}: CREATE POLICY on public.{tbl} "
+                        f"but no CREATE TABLE for public.{tbl} in any file"
+                    )
+                elif creator > sql_path.name:
+                    offenders.append(
+                        f"{sql_path.name}: CREATE POLICY on public.{tbl} "
+                        f"but CREATE TABLE is in {creator} (later file)"
+                    )
+        self.assertEqual(
+            offenders,
+            [],
+            "policy references table whose CREATE TABLE is missing "
+            "or in a later migration file: " + "; ".join(offenders),
+        )
+
+
+class TestSaasUpsertPlanRPC(unittest.TestCase):
+    """A09 regression pins for the admin Server Action's RPC.
+
+    page.tsx calls supabase.rpc('upsert_plan_with_audit', ...) for every
+    admin plan save. If the function does not exist, every admin write
+    throws at runtime and the audit_log row never gets written. Pin:
+
+      - function exists in 0003
+      - signature matches page.tsx: (actor_id uuid, plan_id_in uuid,
+        payload jsonb) returns uuid
+      - SECURITY DEFINER (so service_role can run it without per-table grants)
+      - locked down: revoked from public, granted to service_role only
+    """
+
+    def test_0003_defines_upsert_plan_with_audit(self) -> None:
+        third = _migration("0003_upsert_plan_rpc.sql")
+        self.assertRegex(
+            third,
+            r"create or replace function public\.upsert_plan_with_audit\(",
+            "0003_upsert_plan_rpc.sql must CREATE the upsert_plan_with_audit "
+            "function that page.tsx invokes",
+        )
+
+    def test_rpc_signature_matches_caller(self) -> None:
+        """page.tsx calls .rpc('upsert_plan_with_audit', { actor_id,
+        plan_id_in, payload }). The function signature MUST accept those
+        exact names or the JS-side rpc() will fail.
+        """
+        third = _migration("0003_upsert_plan_rpc.sql")
+        self.assertRegex(
+            third,
+            r"actor_id\s+uuid",
+            "function must accept actor_id uuid",
+        )
+        self.assertRegex(
+            third,
+            r"plan_id_in\s+uuid",
+            "function must accept plan_id_in uuid",
+        )
+        self.assertRegex(
+            third,
+            r"payload\s+jsonb",
+            "function must accept payload jsonb",
+        )
+        self.assertRegex(
+            third,
+            r"returns uuid",
+            "function must return uuid (the audit_log.id)",
+        )
+
+    def test_rpc_security_definer(self) -> None:
+        """Service-role caller has no per-table INSERT/UPDATE grants on
+        plans / audit_log. SECURITY DEFINER is the only way the call
+        resolves without separate grant-on-table work.
+        """
+        third = _migration("0003_upsert_plan_rpc.sql")
+        self.assertRegex(
+            third,
+            r"security\s+definer",
+            "function must be SECURITY DEFINER so service_role can run it",
+        )
+
+    def test_rpc_locked_down(self) -> None:
+        """The RPC is privileged (plan write + audit append). Lock it to
+        service_role only — anon and authenticated must not be able to
+        invoke it directly via PostgREST.
+        """
+        third = _migration("0003_upsert_plan_rpc.sql")
+        self.assertRegex(
+            third,
+            r"revoke\s+all\s+on\s+function\s+public\.upsert_plan_with_audit",
+            "function must be revoked from PUBLIC",
+        )
+        self.assertRegex(
+            third,
+            r"grant\s+execute\s+on\s+function\s+public\.upsert_plan_with_audit.*\s+to\s+service_role",
+            "function must grant execute to service_role",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
