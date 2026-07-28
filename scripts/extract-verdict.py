@@ -43,9 +43,22 @@ from pathlib import Path
 
 VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
 
+# A08 / DoS hardening: anthropics/claude-code-action@v1's execution-file
+# is produced by a CI step on GitHub Actions. In normal use it is well
+# under 1 MiB, but a malformed/attacker-influenceable payload could be
+# much larger or deeply nested. Bound the read so an OOM here does not
+# take down the runner and turn the gate into a silent Approve.
+_MAX_INPUT_BYTES = 2 * 1024 * 1024  # 2 MiB hard cap
+_MAX_NESTING_DEPTH = 64  # json.loads default would happily recurse to ~1000
 
-def _iter_messages(path: Path):
-    """Yield each message object from the file.
+
+def _iter_messages(text: str):
+    """Yield each message object from an already-read text blob.
+
+    Pure: takes the file CONTENT, not the path, so the caller does the
+    size precheck and the read.  Yields messages and falls silent on
+    parse errors so the caller can decide whether to treat those as
+    "no verdict" (legacy) or fail-closed (post-A10 hard contract).
 
     Supports two formats:
       1. Pretty-printed JSON array (current claude-code-action):
@@ -54,7 +67,6 @@ def _iter_messages(path: Path):
            {"type":"assistant",...}
            {"type":"user",...}
     """
-    text = path.read_text(encoding="utf-8", errors="replace")
     stripped = text.lstrip()
     if not stripped:
         return
@@ -79,7 +91,7 @@ def _iter_messages(path: Path):
             except json.JSONDecodeError:
                 continue
         return
-    # Unknown leading char (e.g. HTML error page) — bail.
+    # Unknown leading char (e.g. HTML error page) — fall silent.
 
 
 def _collect_text(content) -> list[str]:
@@ -107,6 +119,23 @@ def _collect_text(content) -> list[str]:
 def extract(path: Path) -> str:
     if not path.exists():
         return ""
+    # A08 / F2 — precheck size via stat() so we DO NOT call read_text()
+    # on a pathologically large payload.  Cap is _MAX_INPUT_BYTES.
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return ""
+    if size > _MAX_INPUT_BYTES:
+        # A10 / F2 — emit a stderr sentinel so the caller knows the cap
+        # fired even though no verdict is on stdout.
+        print(
+            f"Install-Broken (input exceeds {_MAX_INPUT_BYTES} bytes; "
+            f"refusing to parse to avoid OOM)",
+            file=sys.stderr,
+        )
+        return ""
+    # F3 — read once, pass the result to the pure parser helper instead
+    # of letting the helper open the file again.
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -120,21 +149,18 @@ def extract(path: Path) -> str:
         return ""
 
     last_verdict = ""
-    try:
-        for msg in _iter_messages(path):
-            if not isinstance(msg, dict):
-                continue
-            if msg.get("type") != "assistant":
-                continue
-            content = msg.get("message", {}).get("content")
-            if content is None:
-                content = msg.get("content")
-            for t in _collect_text(content):
-                m = VERDICT_RE.search(t)
-                if m:
-                    last_verdict = m.group(1)
-    except OSError:
-        return ""
+    for msg in _iter_messages(text):
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("type") != "assistant":
+            continue
+        content = msg.get("message", {}).get("content")
+        if content is None:
+            content = msg.get("content")
+        for t in _collect_text(content):
+            m = VERDICT_RE.search(t)
+            if m:
+                last_verdict = m.group(1)
     return last_verdict
 
 
@@ -143,11 +169,18 @@ def main() -> int:
         print(f"usage: {sys.argv[0]} <claude-execution-output.json>", file=sys.stderr)
         return 2
     path = Path(sys.argv[1])
+    if not path.exists():
+        # A10: missing file — explicit non-zero + sentinel so the gate
+        # does NOT fall open to the empty-verdict Approve default.
+        print(f"Install-Broken (file-not-found: {path})", file=sys.stderr)
+        return 1
     verdict = extract(path)
-    # ALWAYS print to stdout (empty if not found). Caller uses stdout
-    # to decide whether to use the file verdict or fall back.
-    if verdict:
-        print(verdict)
+    if not verdict:
+        # A10: parsed cleanly but agent produced no Verdict: line. Treat
+        # as install-broken so the gate fails closed.
+        print("Install-Broken (no-verdict-line-in-output)", file=sys.stderr)
+        return 1
+    print(verdict)
     return 0
 
 
