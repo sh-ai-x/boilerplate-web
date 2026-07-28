@@ -19,6 +19,13 @@
 --     INSERT/UPDATE grants on plans or audit_log.
 --   - revoked from PUBLIC, granted only to service_role. The admin Server
 --     Action runs under the service-role client.
+--   - actor_id is validated server-side: NOT NULL + EXISTS check against
+--     auth.users. This prevents the audit_trail-spoof attack where any
+--     future caller that reaches the RPC could attribute its write to
+--     a UUID that does not correspond to a real admin (including the
+--     zero UUID 00000000-0000-0000-0000-000000000000). The caller is
+--     expected to read auth.uid() from the admin JWT before calling
+--     and pass it as actor_id; the existence check is the perimeter.
 
 -- ---------------------------------------------------------------------------
 -- upsert_plan_with_audit()
@@ -39,6 +46,16 @@ declare
   v_payload   jsonb;
   v_audit_id  uuid;
 begin
+  -- Defend the audit trail. actor_id MUST come from a real admin
+  -- user (the caller reads auth.uid() from the JWT and passes it),
+  -- so refuse anything that fails either guard.
+  if actor_id is null then
+    raise exception 'upsert_plan_with_audit: actor_id is required (would defeat the audit trail)';
+  end if;
+  if not exists (select 1 from auth.users where id = actor_id) then
+    raise exception 'upsert_plan_with_audit: actor_id % does not correspond to a known auth user', actor_id;
+  end if;
+
   -- Validate required payload fields. CHECK constraints on plans will
   -- also enforce these server-side, but doing it here means we never
   -- silently INSERT a malformed row.

@@ -17,13 +17,18 @@ Pin the schema-level invariants the security review on PR #30 flagged:
         Defined in 0001_init.sql so plans_admin_write (which is also
         in 0001) can resolve it.
 
+  A06 / A09 - 0003_upsert_plan_rpc.sql's actor_id MUST be validated
+        server-side (NOT NULL + EXISTS in auth.users). The audit
+        trail cannot be attributed to a UUID that does not exist
+        (including the zero UUID 00000000-0000-0000-0000-000000000000).
+
 Background: PR #26's gate rubber-stamped 'Verdict: Blocked' (14
-findings, 3 critical) on the agent's verdict while the file parser
-silently returned ""; PR #30 inherits the same template and was
-flagged with three BLOCKING findings - a missing audit_log table,
-the wrong role check in plans RLS, and an undefined audit-write
-surface. These tests pin the corrected schema so future migrations
-cannot regress.
+findings, 3 critical). These tests pin the schema contracts so the
+rubber-stamp regression cannot recur.
+
+The SQL is tested by parsing the migration source as text — the same
+language-tool-free technique used in scripts/extract-verdict tests so
+the suite runs in the CI pytest env without a Postgres instance.
 
 No mocks. Reads the SQL files as text, parses the create_table /
 create_function / create_policy statements with regex, and asserts
@@ -288,6 +293,40 @@ class TestSaasUpsertPlanRPC(unittest.TestCase):
             third,
             r"grant\s+execute\s+on\s+function\s+public\.upsert_plan_with_audit.*\s+to\s+service_role",
             "function must grant execute to service_role",
+        )
+
+    # --- A06 / A09: actor_id validation (audit-trail-spoof defense) ---
+    #
+    # The function takes actor_id as an argument and writes it into
+    # audit_log.actor_id without a server-side check. Any future caller
+    # could attribute the audit row to a UUID that does not correspond
+    # to a real user (including 00000000-0000-0000-0000-000000000000),
+    # destroying the forensic value of the audit trail. The fix is a
+    # NOT NULL guard + an EXISTS check against auth.users. These tests
+    # pin that contract.
+
+    def test_actor_id_is_validated_as_not_null(self) -> None:
+        third = _migration("0003_upsert_plan_rpc.sql")
+        # Must have a NOT NULL check before any INSERT into audit_log
+        # runs. The validator must mention actor_id by name (not just
+        # a generic null guard) so an attacker cannot accidentally
+        # bypass it by renaming the parameter.
+        self.assertRegex(
+            third,
+            r"if\s+actor_id\s+is\s+null\s+then",
+            "actor_id NOT NULL guard missing — the audit trail could be spoofed",
+        )
+
+    def test_actor_id_is_validated_against_auth_users(self) -> None:
+        third = _migration("0003_upsert_plan_rpc.sql")
+        # Must verify the actor_id corresponds to a real auth.users row.
+        # Plain UUID format checks (regex) are insufficient — the database
+        # is the source of truth for "is this a real user".
+        self.assertRegex(
+            third,
+            r"from\s+auth\.users\s+where\s+id\s*=\s*actor_id",
+            "actor_id must be checked against auth.users — the audit trail "
+            "must not accept UUIDs that have no corresponding user row",
         )
 
 
