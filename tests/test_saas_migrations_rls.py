@@ -165,6 +165,23 @@ class TestSaasMigrationsRLS(unittest.TestCase):
 
     # --- cross-file ordering invariant -------------------------------------
 
+    def test_plans_public_read_includes_anon(self) -> None:
+        """The pricing page calls createServerSupabase() which runs
+        under the anon role. If plans_read_authenticated were scoped
+        to `to authenticated`, the anon SELECT on /pricing would be
+        denied by RLS and the page would render empty even with seed
+        rows. The policy must cover `to anon, authenticated` so the
+        public pricing route works for signed-out visitors.
+        """
+        first = _migration("0001_init.sql")
+        self.assertRegex(
+            first,
+            r"create\s+policy\s+\"plans_read_authenticated\"[^;]*?\bto\s+anon,\s+authenticated",
+            "plans read policy must scope to anon, authenticated — "
+            "scoping to authenticated alone breaks the /pricing page "
+            "for signed-out visitors under the anon Supabase client",
+        )
+
     def test_create_table_before_create_policy_ordering(self) -> None:
         """For every (table, file) pair where file contains a
         CREATE POLICY on public.<table>, at least one EARLIER

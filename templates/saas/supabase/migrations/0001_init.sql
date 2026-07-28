@@ -80,11 +80,14 @@ alter table public.subscriptions enable row level security;
 alter table public.payments enable row level security;
 alter table public.audit_log enable row level security;
 
--- plans: any authenticated user can READ; only admins can WRITE
+-- plans: anon and authenticated can READ (the public pricing page
+-- uses createServerSupabase(), which runs under the anon role, so
+-- scoping reads to authenticated breaks /pricing for signed-out
+-- visitors). Only admins can WRITE.
 drop policy if exists "plans_read_authenticated" on public.plans;
 create policy "plans_read_authenticated"
   on public.plans for select
-  to authenticated
+  to anon, authenticated
   using (true);
 
 drop policy if exists "plans_admin_write" on public.plans;

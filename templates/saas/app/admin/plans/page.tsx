@@ -140,7 +140,21 @@ export default async function AdminPlansPage() {
           <option value="month">month</option>
           <option value="year">year</option>
         </select>
-        <input name="external_plan_key" placeholder="external_plan_key" />
+        {/* Pre-fill external_plan_key with the value of the row the
+            admin is editing (when an id is supplied above). Without
+            the defaultValue, a routine admin edit on an existing
+            plan would submit an empty string for external_plan_key
+            and the upsert RPC would coalesce it to NULL — wiping
+            the live Toss plan key the recurring billing depends on. */}
+        <input
+          name="external_plan_key"
+          placeholder="external_plan_key (Toss)"
+          defaultValue={(() => {
+            const id = (typeof document !== 'undefined') ? (document.querySelector<HTMLInputElement>('input[name="id"]')?.value || '') : '';
+            const row = id ? plans.find((p) => p.id === id) : null;
+            return row?.external_plan_key ?? '';
+          })()}
+        />
         <button type="submit">Save</button>
       </form>
     </section>
