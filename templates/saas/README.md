@@ -32,7 +32,8 @@ where email = 'you@example.com';
 
 ## Toss billing-key
 - Get `TOSS_SECRET_KEY` and `TOSS_AUTH_KEY` from the Toss Payments dashboard.
-- For each plan, copy the Toss-side plan key into the `plans.toss_plan_key` column.
+- For each plan, copy the Toss-side plan key into the `plans.external_plan_key` column
+  (the template column is generic so a non-Toss PSP can be swapped in later).
 - The Edge Function does the `billing/authorizations/issue` confirm and stores
   the resulting `billing_key` in `subscriptions.billing_key`.
 
