@@ -382,5 +382,65 @@ class TestSaasAuditLogAppendOnly(unittest.TestCase):
         )
 
 
+class TestSaasClaimTossBillingKeyCleanup(unittest.TestCase):
+    """A04: claim_toss_billing_key_cleanup RPC must exist.
+
+    The Edge Function calls this RPC after a failed subscriptions
+    INSERT to decide whether the unused Toss billing key is safe to
+    delete (tri-state: true | false | error). If the function is
+    missing, the Edge Function falls through to the unknown-state
+    branch and never deletes the key — the orphan accumulates.
+    PR #30 condensed 0001 and the function dropped out as a side
+    effect; 0004_toss_cleanup_rpc.sql restores it as an additive
+    statement so fresh-DB migrations still resolve the call.
+    """
+
+    def test_0004_exists_in_migrations_dir(self) -> None:
+        self.assertTrue(
+            (MIGRATIONS / "0004_toss_cleanup_rpc.sql").exists(),
+            "0004_toss_cleanup_rpc.sql must exist to re-add "
+            "claim_toss_billing_key_cleanup after PR #30's 0001 rewrite",
+        )
+
+    def test_0004_defines_function_with_text_return(self) -> None:
+        fourth = _migration("0004_toss_cleanup_rpc.sql")
+        self.assertRegex(
+            fourth,
+            r"create\s+or\s+replace\s+function\s+public\.claim_toss_billing_key_cleanup\s*\(\s*p_billing_key\s+text,\s*p_active_subscription_id\s+uuid\s*\)\s*returns\s+text",
+            "claim_toss_billing_key_cleanup must take (text, uuid) "
+            "and return TEXT so the tri-state contract survives in "
+            "the Edge Function's RPC call",
+        )
+
+    def test_0004_function_handles_exception_path(self) -> None:
+        fourth = _migration("0004_toss_cleanup_rpc.sql")
+        self.assertRegex(
+            fourth,
+            r"exception\s+when\s+others\s+then[\s\S]{0,200}return\s+'error'",
+            "claim_toss_billing_key_cleanup must catch internal "
+            "exceptions and return 'error' — propagating would defeat "
+            "the tri-state contract",
+        )
+
+    def test_0004_function_is_security_definer_and_locked_down(self) -> None:
+        fourth = _migration("0004_toss_cleanup_rpc.sql")
+        self.assertRegex(
+            fourth,
+            r"security\s+definer",
+            "claim_toss_billing_key_cleanup must be SECURITY DEFINER so "
+            "anon/service_role callers don't need direct SELECT on subscriptions",
+        )
+        self.assertRegex(
+            fourth,
+            r"revoke\s+all\s+on\s+function\s+public\.claim_toss_billing_key_cleanup",
+            "claim_toss_billing_key_cleanup must be revoked from PUBLIC",
+        )
+        self.assertRegex(
+            fourth,
+            r"grant\s+execute\s+on\s+function\s+public\.claim_toss_billing_key_cleanup.*\s+to\s+service_role",
+            "claim_toss_billing_key_cleanup must grant execute to service_role",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
