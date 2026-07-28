@@ -330,5 +330,57 @@ class TestSaasUpsertPlanRPC(unittest.TestCase):
         )
 
 
+class TestSaasAuditLogAppendOnly(unittest.TestCase):
+    """A09: audit_log is append-only.
+
+    RLS + REVOKE are not enough on their own: service_role bypasses
+    RLS, and a permissive GRANT or future migration could silently
+    re-grant UPDATE/DELETE. A trigger enforces append-only-ness
+    INSIDE the same transaction as the mutating statement, so even
+    a privileged caller cannot rewrite or scrub forensic rows.
+    """
+
+    def test_audit_log_has_block_mutations_trigger_function(self) -> None:
+        second = _migration("0002_audit_log.sql")
+        self.assertRegex(
+            second,
+            r"create\s+or\s+replace\s+function\s+public\.audit_log_block_mutations\s*\(\s*\)\s*returns\s+trigger",
+            "audit_log must have a block-mutations trigger function "
+            "that raises exception on UPDATE/DELETE",
+        )
+
+    def test_audit_log_has_no_update_trigger(self) -> None:
+        second = _migration("0002_audit_log.sql")
+        self.assertRegex(
+            second,
+            r"create\s+trigger\s+audit_log_no_update\s+before\s+update\s+on\s+public\.audit_log",
+            "audit_log must have a BEFORE UPDATE trigger that fires the "
+            "block-mutations function — UPDATE is the primary tampering vector",
+        )
+
+    def test_audit_log_has_no_delete_trigger(self) -> None:
+        second = _migration("0002_audit_log.sql")
+        self.assertRegex(
+            second,
+            r"create\s+trigger\s+audit_log_no_delete\s+before\s+delete\s+on\s+public\.audit_log",
+            "audit_log must have a BEFORE DELETE trigger — DELETE is "
+            "the mass-scrub vector and must be blocked at the SQL layer",
+        )
+
+    def test_audit_log_has_revoke_update_delete_defense_in_depth(self) -> None:
+        second = _migration("0002_audit_log.sql")
+        # Defense in depth: even with the trigger, REVOKE narrows the
+        # attack surface so only service_role could attempt a
+        # mutation. Service_role cannot actually mutate either
+        # (the trigger fires for any role) but the REVOKE is the
+        # first line of defense.
+        self.assertRegex(
+            second,
+            r"revoke\s+update,\s*delete\s+on\s+public\.audit_log\s+from\s+public",
+            "audit_log must revoke UPDATE/DELETE from PUBLIC as the first "
+            "line of defense in addition to the trigger",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
