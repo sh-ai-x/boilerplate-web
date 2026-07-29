@@ -87,7 +87,27 @@ if [[ "$FILE_PATH" =~ (\.worktrees/)([^/]+) ]] \
   WT_NAME="${BASH_REMATCH[2]}"
   # Resolve the worktree dir anchored at $MAIN_ROOT (cwd-independent).
   if [ -d "${MAIN_ROOT}/.worktrees/${WT_NAME}" ]; then
-    ORCH_BRANCH="$(git -C "${MAIN_ROOT}/.worktrees/${WT_NAME}" symbolic-ref --short HEAD 2>/dev/null || echo detached)"
+    # Capture git exit code so a failure is NOT silently swallowed as the
+    # literal 'detached' string (which never matches orch/* and would
+    # therefore silently skip the orch isolation check — the agent's
+    # A10 'overloaded detached' finding). Treat a real detached HEAD as
+    # 'detached' and a git failure as empty (skip the orch check).
+    local_branch="$(git -C "${MAIN_ROOT}/.worktrees/${WT_NAME}" symbolic-ref --short HEAD 2>/dev/null)"
+    if [ -z "$local_branch" ]; then
+      # Distinguish "not a symbolic-ref" (real detached HEAD) from "git
+      # failed" by re-running with explicit exit code capture.
+      if git -C "${MAIN_ROOT}/.worktrees/${WT_NAME}" symbolic-ref --short HEAD >/dev/null 2>&1; then
+        ORCH_BRANCH="detached"
+      else
+        # git itself failed (filesystem, perms, transient). Do NOT
+        # mis-classify as 'detached' — leave ORCH_BRANCH empty so the
+        # orch check is skipped, and emit a stderr breadcrumb for the
+        # babysit log so the failure is observable.
+        printf '[worktree-guard] git symbolic-ref failed for %s; skipping orch-branch check\n' "${MAIN_ROOT}/.worktrees/${WT_NAME}" >&2
+      fi
+    else
+      ORCH_BRANCH="$local_branch"
+    fi
   fi
 fi
 if [[ "$ORCH_BRANCH" == orch/* ]]; then
@@ -105,13 +125,20 @@ if [[ "$ORCH_BRANCH" == orch/* ]]; then
   # directory segments should be protected). `scripts/` and `cli/` are
   # included because they hold the policy-enforcing code for the CI
   # integration; without them an orch-branch could rewrite the validator.
+  # The optional leading `[.]?` covers hidden directories (`.dev-kit/`,
+  # `.github/`, `.claude/`) — without it the regex anchored on `(^|/)`
+  # followed by the literal `dev-kit` would NOT match `.dev-kit/`
+  # because the `.` between the anchor and the name is part of the
+  # directory name, not the boundary. This is the agent's A01-2 finding.
+  # Protected extensions include `.tsx/.jsx/.mjs/.cjs` so an orch branch
+  # cannot edit React source outside the gated subtree (A01-1).
   if printf '%s' "$FILE_PATH" \
-       | grep -qE '(^|/)(lib|hooks|skills|tests|templates|bin|dev-kit|scripts|cli)/' \
+       | grep -qE '(^|/)[.]?(lib|hooks|skills|tests|templates|bin|dev-kit|scripts|cli|github|claude|codex)/' \
        || printf '%s' "$FILE_PATH" \
-       | grep -qE '\.(py|sh|ts|js)$' \
+       | grep -qE '\.(py|sh|ts|js|tsx|jsx|mjs|cjs)$' \
        || printf '%s' "$FILE_PATH" \
        | grep -qE '(^|/)\.(codex-plugin|claude-plugin)'; then
-    deny "ORCH ISOLATION" "code edits are forbidden in orch/* worktree. Allowed paths only are .dev-kit/round-*/**. Move the change to a feature worktree."
+    deny "ORCH ISOLATION" "code edits are forbidden in orch/* worktree (file_path=$FILE_PATH). Allowed paths only are .dev-kit/round-*/**. Move the change to a feature worktree."
   fi
 fi
 
