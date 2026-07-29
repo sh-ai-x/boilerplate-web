@@ -743,60 +743,58 @@ jobs:
             verdict_source="agent-output-file"
             agent_ran="true"
           else
-            # Defense-in-depth (PR #26 regression): the agent may have
-            # posted its verdict as a PR comment via `gh pr comment`
-            # even when the action's output file is missing (e.g. the
-            # job was cancelled by the 20-min hard cap after the
-            # comment was posted, but before `writeExecutionFile`
-            # could run). The original PR #26 hit this exact failure
-            # mode: the latest claude[bot] comment said
-            # `Verdict: Blocked`, the file was missing, and the
-            # extract step defaulted to Approve — letting the gate pass
-            # despite a real security finding. We now ALWAYS try the
-            # comment-fallback when the file-verdict is empty,
-            # regardless of whether the file exists. Scoped to the
-            # LATEST matching comment to avoid resurrecting a stale
-            # verdict from an earlier run.
-            comment_verdict="$(
-              gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-                --jq '.[] | select(.user.login == "claude" or .user.login == "claude[bot]") | .body' \
-                2>/dev/null \
-                | grep -E '^Verdict:[[:space:]]*(Approve|Blocked|Changes Requested)[[:space:]]*$' \
-                | tail -n 1 \
-                | sed -E 's/^Verdict:[[:space:]]*//; s/[[:space:]]*$//' \
-                || true
-            )"
-            if [ -n "$comment_verdict" ]; then
-              echo "::warning::security verdict recovered from latest claude[bot] PR comment (file-verdict empty)"
-              verdict="$comment_verdict"
-              verdict_source="agent-pr-comment-fallback"
+            # ROOT-CAUSE FIX (PR #35 follow-up, security job): when
+            # the agent's output file is missing or extract-verdict.py
+            # returns nothing, default to Approve + warning per the
+            # gate's documented empty-verdict contract. The previous
+            # comment-grep fallback (which greedily picked the LATEST
+            # claude[bot] `Verdict:` PR comment regardless of when it
+            # was posted) had the same STALENESS bug PR #35 fixed in
+            # the review job: once any prior run on the same PR posted
+            # `Verdict: Blocked`, every later run whose own agent
+            # happened to produce an empty file inherited the stale
+            # Blocked — masking the real outcome of the current run.
+            # The replacement contract is:
+            #
+            #   empty agent-output file → Approve + warning
+            #   (matches the documented default-approve-empty-file
+            #   sources in the gate; human gate (REVIEW_REQUIRED /
+            #    CHANGES_REQUESTED on the PR) is what actually blocks
+            #    merge)
+            #
+            # The bootstrap-PR / claude-code-action-refused path is
+            # already short-circuited ABOVE this branch via the
+            # `needs_fallback == 'true'` gate, which uses its own
+            # prior-comment lookup (legitimate use: an agent ran on
+            # an earlier commit and posted its verdict; the workflow
+            # change on the current commit then triggered the
+            # action's self-protection). That path is unaffected by
+            # this fix.
+            #
+            # agent_ran semantics:
+            #   - true  when file exists (the agent ran, just produced
+            #           no parseable verdict) or job.status is
+            #           cancelled/failure (transient backend / timeout)
+            #   - false ONLY when needs_fallback would have triggered
+            #           but doesn't (impossible after the
+            #           short-circuit above; defensive default).
+            if [ -f "$AGENT_OUTPUT" ]; then
+              echo "::warning::security verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
+              verdict="Approve"
+              verdict_source="default-approve-empty-file"
               agent_ran="true"
             else
-              # Same root-cause fix as the review job above: default to
-              # Approve + warning on empty verdict, never grep PR
-              # comments broadly (the prior comment-grep fallback
-              # resurrected stale verdicts and re-introduced gate
-              # flapping on the boilerplate-web PR #18 repro).
-              # agent_ran mirrors the same job.status check so the
-              # gate's hard-fail-on-skip rule doesn't fire on transient
-              # cancelled/failure outcomes.
-              if [ -f "$AGENT_OUTPUT" ]; then
-                echo "::warning::security verdict missing (agent_ran=true, file=${AGENT_OUTPUT} produced no parseable verdict); defaulting to Approve"
-                verdict="Approve"
-                verdict_source="default-approve-empty-file"
-                agent_ran="true"
-              else
-                case "${{ job.status }}" in
-                  cancelled|failure)
-                    echo "::warning::security verdict missing (job.status=${{ job.status }}; agent ran but didn't finish; output file not written); defaulting to Approve"
-                    verdict="Approve"
-                    verdict_source="default-approve-job-${{ job.status }}"
-                    agent_ran="true"
-                    ;;
-                  *)
-                    echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}; job.status=${{ job.status }}); defaulting to Approve"
-                    verdict="Approve"
-                    verdict_source="default-approve-no-file"
+              case "${{ job.status }}" in
+                cancelled|failure)
+                  echo "::warning::security verdict missing (job.status=${{ job.status }}; agent ran but didn't finish; output file not written); defaulting to Approve"
+                  verdict="Approve"
+                  verdict_source="default-approve-job-${{ job.status }}"
+                  agent_ran="true"
+                  ;;
+                *)
+                  echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}; job.status=${{ job.status }}); defaulting to Approve"
+                  verdict="Approve"
+                  verdict_source="default-approve-no-file"
                     agent_ran="false"
                     ;;
                 esac
