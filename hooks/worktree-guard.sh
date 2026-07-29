@@ -99,11 +99,14 @@ if [[ "$FILE_PATH" =~ (\.worktrees/)([^/]+) ]] \
       if git -C "${MAIN_ROOT}/.worktrees/${WT_NAME}" symbolic-ref --short HEAD >/dev/null 2>&1; then
         ORCH_BRANCH="detached"
       else
-        # git itself failed (filesystem, perms, transient). Do NOT
-        # mis-classify as 'detached' — leave ORCH_BRANCH empty so the
-        # orch check is skipped, and emit a stderr breadcrumb for the
-        # babysit log so the failure is observable.
-        printf '[worktree-guard] git symbolic-ref failed for %s; skipping orch-branch check\n' "${MAIN_ROOT}/.worktrees/${WT_NAME}" >&2
+        # git itself failed (filesystem, perms, transient). Fail CLOSED
+        # rather than fail-open: set ORCH_BRANCH to a sentinel that
+        # matches the orch/* glob so the protected-path deny fires.
+        # The orch check requires positive branch knowledge to skip;
+        # without that knowledge we conservatively assume orch.
+        # The agent's A06 finding recommended this direction.
+        ORCH_BRANCH="orch/unknown-git-failure"
+        printf '[worktree-guard] git symbolic-ref failed for %s; failing CLOSED on orch branch\n' "${MAIN_ROOT}/.worktrees/${WT_NAME}" >&2
       fi
     else
       ORCH_BRANCH="$local_branch"
@@ -114,8 +117,46 @@ if [[ "$ORCH_BRANCH" == orch/* ]]; then
   # .dev-kit/round-*/** hand-off tmp notes are the ONLY writable paths
   # on an orchestration branch — short-circuit before main-deny so the
   # orchestrator can leave round-N notes even if cwd is main checkout.
-  # Matches .dev-kit/round-* at the start OR after any slash segment.
-  if [[ "$FILE_PATH" =~ (^|/)\.dev-kit/round- ]]; then
+  # Defense against path traversal (A01 critical in iter-9 review):
+  # a crafted FILE_PATH like '/repo/.worktrees/orch-foo/.dev-kit/round-1/
+  # ../../../../lib/evil.py' contains the literal .dev-kit/round-* text
+  # and would match the regex below, but filesystem resolution lands
+  # OUTSIDE the round tree and so defeats the orch isolation. Canonicalize
+  # via realpath -m (no symlink resolution, just lexical normalization of
+  # /../ and ./ segments), then verify the result still begins with
+  # /.dev-kit/round- (segment boundary, not substring) before exempting.
+  # realpath -m requires GNU realpath or BSD realpath; both behave
+  # identically for lexical normalization. Fall back to the literal
+  # substring match if realpath is unavailable so the exemption still
+  # works on minimal PATH (mirrors the existing abspath() fallback in
+  # lib/worktree-detect.sh).
+  ROUND_OK=0
+  # First-pass lexical match on the raw file_path so legitimate round-N
+  # notes short-circuit without invoking python on every file. Realpath
+  # / normpath canonicalization (pass 2) catches /../ traversal.
+  for candidate in "$FILE_PATH" "./${FILE_PATH#/}"; do
+    if [[ "$candidate" =~ (^|/)\.dev-kit/round-[^/]*(/|$) ]]; then
+      ROUND_OK=1
+      break
+    fi
+  done
+  if [ "$ROUND_OK" = "1" ] && command -v python3 >/dev/null 2>&1; then
+    # Normalize via python (available on every Claude Code host — Bash,
+    # inline shell, and the agent itself all run python). Lexical
+    # canonicalization collapses '/../' segments so '/repo/.worktrees/
+    # orch-foo/.dev-kit/round-1/../../../../lib/evil.py' resolves to
+    # '/repo/lib/evil.py' which is OUTSIDE the round tree. realpath -m
+    # would also work but BSD realpath on macOS does not implement -m.
+    REAL_FILE_PATH="$(python3 -c 'import os, sys; print(os.path.normpath(sys.argv[1]))' "$FILE_PATH" 2>/dev/null || printf '%s' "$FILE_PATH")"
+    # After normpath the path must still BEGIN with /.dev-kit/round- at
+    # a segment boundary (not as a substring of some other directory name).
+    if [[ "$REAL_FILE_PATH" =~ (^|/)(\.dev-kit)/round-[^/]*(/|$) ]]; then
+      ROUND_OK=1
+    else
+      ROUND_OK=0
+    fi
+  fi
+  if [ "$ROUND_OK" = "1" ]; then
     exit 0
   fi
   # Anchor each directory-segment match with `/` boundaries so files like
