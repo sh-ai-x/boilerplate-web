@@ -53,7 +53,15 @@ FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/n
 # a fail-open when an attacker-controlled EDITOR / SPONSOR process invoked
 # the hook from a sibling worktree).
 MAIN_ROOT="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | xargs dirname)"
-[ -z "$MAIN_ROOT" ] || [ ! -d "$MAIN_ROOT" ] && MAIN_ROOT="."
+# Reset to "." when git-common-dir is unavailable (no .git) or the resolved
+# root does not exist on disk. Using an explicit if/else to avoid the bash
+# precedence trap where `[ -z ] || [ ! -d ] && X` parses as
+# `[ -z ] || ([ ! -d ] && X)` — the empty-string arm short-circuits the
+# `||` and the `&&` fallback never runs, leaving MAIN_ROOT="" and silently
+# failing open the orch-branch check below.
+if [ -z "$MAIN_ROOT" ] || [ ! -d "$MAIN_ROOT" ]; then
+  MAIN_ROOT="."
+fi
 
 # Orchestration branches (orch/*) are routing/analysis-only worktrees.
 # Edits to protected paths (code, hooks, tests, manifests, plugins,
@@ -73,7 +81,9 @@ MAIN_ROOT="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null |
 # into (the worktree IS a git linkfile, so `git -C <path>` resolves
 # the correct branch without cd).
 ORCH_BRANCH=""
-if [[ "$FILE_PATH" =~ (\.worktrees/)([^/]+) ]]; then
+if [[ "$FILE_PATH" =~ (\.worktrees/)([^/]+) ]] \
+   && [[ "${BASH_REMATCH[2]}" != "." ]] \
+   && [[ "${BASH_REMATCH[2]}" != ".." ]]; then
   WT_NAME="${BASH_REMATCH[2]}"
   # Resolve the worktree dir anchored at $MAIN_ROOT (cwd-independent).
   if [ -d "${MAIN_ROOT}/.worktrees/${WT_NAME}" ]; then
@@ -92,9 +102,11 @@ if [[ "$ORCH_BRANCH" == orch/* ]]; then
   # `mylib`, `xxhooks`, `srctests` are NOT mis-detected as protected paths
   # (the prior unanchored `*lib|*hooks|*tests` glob over-matched any path
   # ending in those suffixes — only `lib/`, `hooks/`, `tests/`, etc. as
-  # directory segments should be protected).
+  # directory segments should be protected). `scripts/` and `cli/` are
+  # included because they hold the policy-enforcing code for the CI
+  # integration; without them an orch-branch could rewrite the validator.
   if printf '%s' "$FILE_PATH" \
-       | grep -qE '(^|/)(lib|hooks|skills|tests|templates|bin|dev-kit)/' \
+       | grep -qE '(^|/)(lib|hooks|skills|tests|templates|bin|dev-kit|scripts|cli)/' \
        || printf '%s' "$FILE_PATH" \
        | grep -qE '\.(py|sh|ts|js)$' \
        || printf '%s' "$FILE_PATH" \
