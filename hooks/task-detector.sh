@@ -46,7 +46,7 @@ fi
 PROMPT="$(printf '%s' "$INPUT" | jq -r '.prompt // ""' 2>/dev/null)"
 [ -z "$PROMPT" ] && exit 0
 
-extract_hook_cwd "task-detector.sh"
+extract_hook_cwd
 
 # Detect task intent (case-insensitive). Word-boundary regex on the
 # leading verb avoids matching "make sure", "write a brief", etc.

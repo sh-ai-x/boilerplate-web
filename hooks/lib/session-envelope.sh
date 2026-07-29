@@ -15,7 +15,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   exit 1
 fi
 
-# extract_hook_cwd HOOK_NAME — read HOOK_CWD from stdin payload and cd into it.
+# extract_hook_cwd — read HOOK_CWD from stdin payload and cd into it.
 # Falls back to current $PWD if the payload cwd is missing or not a directory.
 # Always returns 0; the caller decides whether to short-circuit.
 extract_hook_cwd() {

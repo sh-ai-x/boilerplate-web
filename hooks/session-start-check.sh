@@ -31,7 +31,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-extract_hook_cwd "session-start-check.sh"
+extract_hook_cwd
 
 # Detect whether we are in the main checkout or a worktree.
 worktree_detect

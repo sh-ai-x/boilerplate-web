@@ -83,7 +83,6 @@ extract_content() {
   ' 2>/dev/null || true)"
 }
 
-
 # deny HOOK_PREFIX REASON — emit PreToolUse deny JSON envelope to stderr and
 # exit 2. Single source of truth for the 6 hook sites that previously each
 # hand-built the envelope (3 different mechanisms: jq -nc --arg / heredoc /
@@ -93,10 +92,10 @@ extract_content() {
 # exit 2). Fails closed if jq is missing — callers must source this file
 # AFTER require_jq.
 deny() {
-    local hook_prefix="$1"
-    local reason="$2"
-    jq -nc --arg hp "$hook_prefix" --arg r "$reason" \
-        '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:($hp + ": " + $r)}}' \
-        >&2
-    exit 2
+  local hook_prefix="$1"
+  local reason="$2"
+  jq -nc --arg hp "$hook_prefix" --arg r "$reason" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:($hp + ": " + $r)}}' \
+    >&2
+  exit 2
 }

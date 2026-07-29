@@ -20,53 +20,13 @@
 # The discriminator lives in hooks/lib/worktree-detect.sh so the
 # three rule-hooks don't drift. See .claude/rules/git-workflow.md.
 
-# VERSION-SLOT RULE (canonical contract — see PR #270 for the
-# implementation and test):
-#   slot = origin/main HEAD plugin.json version + (PR merge-order index - 1)
-# Sub-agents pushing a PR MUST verify slot, re-pin both plugin.json
-# files if mismatched, then push with --force-with-lease.
-# Slot examples (assuming origin/main HEAD = 0.3.75):
-#   PR #266 -> slot 1 -> 0.3.76
-#   PR #267 -> slot 2 -> 0.3.77
-#   PR #271 -> slot 6 -> 0.3.81
-#
-# _compute_version_slot — version-slot helper for parallel-PR pushes.
-#
-# Computes the plugin.json version slot for a PR given its merge-order
-# position. The formula:
-#   slot = origin/main HEAD version + (PR_index - 1)
-# where PR_index is 1-based (1 = first merged, 2 = second, etc.).
-#
-# Sub-agents pushing a PR MUST call this to verify their plugin.json
-# matches the slot BEFORE pushing. If mismatch: re-pin both files,
-# commit, then push with --force-with-lease.
-#
-# Reference: see the "VERSION-SLOT RULE" block above in the hook
-# header comments for the full rationale and slot examples.
-_compute_version_slot() {
-  local pr_index="${1:-1}"   # 1-based merge-order position
-  local main_version
-  main_version=$(git show origin/main:.claude-plugin/plugin.json 2>/dev/null \
-    | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null)
-  if [ -z "$main_version" ]; then
-    printf '0.3.75\n'   # fallback (origin unavailable)
-    return 0
-  fi
-  python3 -c "
-import sys
-v = '${main_version}'
-parts = v.split('.')
-parts[2] = str(int(parts[2]) + ${pr_index} - 1)
-print('.'.join(parts))
-"
-}
-
 set -uo pipefail
 INPUT="$(cat)"
 
 # Source the shared worktree-detection helper.
 # shellcheck source=lib/worktree-detect.sh
-source "$(dirname "$0")/lib/worktree-detect.sh"
+# shellcheck source=lib/payload-parse.sh
+source "${BASH_SOURCE[0]%/*}/lib/worktree-detect.sh"
 source "${BASH_SOURCE[0]%/*}/lib/payload-parse.sh"
 
 # Fail CLOSED if jq is missing. Without jq we cannot parse the
@@ -84,6 +44,16 @@ fi
 # a probe call from any cwd (main checkout included) is a no-op.
 FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)"
 [ -z "$FILE_PATH" ] && exit 0
+
+# Resolve the MAIN checkout root via git-common-dir (absolute, cwd-independent).
+# This is the directory that owns the `.worktrees/<name>/` siblings, so the
+# orch-branch detection below must anchor there instead of using a relative
+# `.worktrees/...` path that silently miss-resolves when the hook runs from
+# anywhere other than the main checkout (the original cwd-relative form was
+# a fail-open when an attacker-controlled EDITOR / SPONSOR process invoked
+# the hook from a sibling worktree).
+MAIN_ROOT="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | xargs dirname)"
+[ -z "$MAIN_ROOT" ] || [ ! -d "$MAIN_ROOT" ] && MAIN_ROOT="."
 
 # Orchestration branches (orch/*) are routing/analysis-only worktrees.
 # Edits to protected paths (code, hooks, tests, manifests, plugins,
@@ -105,10 +75,9 @@ FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/n
 ORCH_BRANCH=""
 if [[ "$FILE_PATH" =~ (\.worktrees/)([^/]+) ]]; then
   WT_NAME="${BASH_REMATCH[2]}"
-  # Resolve the worktree dir relative to the main checkout, which
-  # always owns the `.worktrees/<name>/` sibling directories.
-  if [ -d ".worktrees/${WT_NAME}" ]; then
-    ORCH_BRANCH="$(git -C ".worktrees/${WT_NAME}" symbolic-ref --short HEAD 2>/dev/null || echo detached)"
+  # Resolve the worktree dir anchored at $MAIN_ROOT (cwd-independent).
+  if [ -d "${MAIN_ROOT}/.worktrees/${WT_NAME}" ]; then
+    ORCH_BRANCH="$(git -C "${MAIN_ROOT}/.worktrees/${WT_NAME}" symbolic-ref --short HEAD 2>/dev/null || echo detached)"
   fi
 fi
 if [[ "$ORCH_BRANCH" == orch/* ]]; then
@@ -119,11 +88,19 @@ if [[ "$ORCH_BRANCH" == orch/* ]]; then
   if [[ "$FILE_PATH" =~ (^|/)\.dev-kit/round- ]]; then
     exit 0
   fi
-  case "$FILE_PATH" in
-    *lib/*|*lib|*skills/*|*skills|*hooks/*|*hooks|*tests/*|*tests|*templates/*|*templates|*bin/*|*bin|*.codex-plugin*|*.claude-plugin*|*.py|*.sh|*.ts|*.js)
-      deny "ORCH ISOLATION" "code edits are forbidden in orch/* worktree. Allowed paths only are .dev-kit/round-*/**. Move the change to a feature worktree."
-      ;;
-  esac
+  # Anchor each directory-segment match with `/` boundaries so files like
+  # `mylib`, `xxhooks`, `srctests` are NOT mis-detected as protected paths
+  # (the prior unanchored `*lib|*hooks|*tests` glob over-matched any path
+  # ending in those suffixes — only `lib/`, `hooks/`, `tests/`, etc. as
+  # directory segments should be protected).
+  if printf '%s' "$FILE_PATH" \
+       | grep -qE '(^|/)(lib|hooks|skills|tests|templates|bin|dev-kit)/' \
+       || printf '%s' "$FILE_PATH" \
+       | grep -qE '\.(py|sh|ts|js)$' \
+       || printf '%s' "$FILE_PATH" \
+       | grep -qE '(^|/)\.(codex-plugin|claude-plugin)'; then
+    deny "ORCH ISOLATION" "code edits are forbidden in orch/* worktree. Allowed paths only are .dev-kit/round-*/**. Move the change to a feature worktree."
+  fi
 fi
 
 # Detect whether we are in the main checkout or a worktree. The lib
