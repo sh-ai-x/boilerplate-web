@@ -3,17 +3,131 @@
   "phase": "0-mvp",
   "project": "boilerplate-web",
   "created_at": "2026-07-16T00:00:00Z",
-  "worktree": "plan/boilerplate-cli",
+  "updated_at": "2026-07-30T00:00:00Z",
+  "worktree": "docs/phase-index-2026-07-30",
+  "based_on_main_sha": "b79324b",
   "ambiguity_score": 2,
   "value_score": 9.375,
-  "evidence_count": 3,
+  "evidence_count": 7,
+  "totals": {
+    "completed": 3,
+    "blocked": 4,
+    "pending": 0,
+    "completion_pct": 43
+  },
   "steps": [
-    { "step": 0, "name": "cli-scaffold", "title": "CLI scaffold with degit sub-folder targeting + post-install hook", "status": "pending", "ambiguity_delta": 0.0 },
-    { "step": 1, "name": "shared-infra", "title": "Shared infra: env templates, Supabase client wrapper, Google-OAuth-only auth UI, Turnstile component", "status": "pending", "ambiguity_delta": 0.0 },
-    { "step": 2, "name": "template-saas", "title": "saas template: plans/subscriptions schema, admin pricing UI, Toss billing-key Edge Function", "status": "pending", "ambiguity_delta": 0.0 },
-    { "step": 3, "name": "template-shop", "title": "shop template: products/orders schema (pgsodium TDE on shipping), admin pricing UI, Toss single-payment Edge Function", "status": "pending", "ambiguity_delta": 0.0 },
-    { "step": 4, "name": "template-portfolio", "title": "portfolio template: portfolio_items + guestbook schema, MDX render, Google-auth write — no payment, no Turnstile", "status": "pending", "ambiguity_delta": 0.0 },
-    { "step": 5, "name": "cloudflare-waf", "title": "Cloudflare WAF rules JSON + Turnstile config snippets for saas + shop", "status": "pending", "ambiguity_delta": 0.0 },
-    { "step": 6, "name": "deploy-guide", "title": "Root README + per-template deployment READMEs (Supabase, Cloudflare, Google OAuth, Toss)", "status": "pending", "ambiguity_delta": 0.0 }
+    {
+      "step": 0,
+      "name": "cli-scaffold",
+      "title": "CLI scaffold with degit sub-folder targeting + post-install hook",
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "exit_code": 0,
+      "branch": "plan/boilerplate-cli-step0-v2",
+      "build_sha": "c60494d",
+      "pr": { "number": 18, "state": "MERGED", "merged_at": "2026-07-17T06:07:40Z" },
+      "output_ref": "phases/0-mvp/step0-output.json",
+      "summary": "degit sub-folder targeting + name rewrite + post-install checklist; AC1-AC5 green; 3/3 node --test pass; AC1/AC2 (degit clone + npm install) deferred to CI."
+    },
+    {
+      "step": 1,
+      "name": "shared-infra",
+      "title": "Shared infra: env templates, Supabase client wrapper, Google-OAuth-only auth UI, Turnstile component",
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "exit_code": 0,
+      "branch": "plan/boilerplate-cli-step1",
+      "build_sha": "9e845df",
+      "pr": { "number": 21, "state": "MERGED", "merged_at": "2026-07-17T13:43:51Z" },
+      "output_ref": "phases/0-mvp/step1-output.json",
+      "summary": "Google-OAuth-only auth UI (no email/password/magic-link); Turnstile shared component; .env.example 4 keys; 5/5 vitest pass; portfolio forward-check clean."
+    },
+    {
+      "step": 2,
+      "name": "template-saas",
+      "title": "saas template: plans/subscriptions schema, admin pricing UI, Toss billing-key Edge Function",
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "exit_code": 0,
+      "branch": "feat/0-mvp-step2",
+      "build_sha": "4cddc3b",
+      "pr": {
+        "merged": [
+          { "number": 31, "title": "feat(0-mvp): step 2b — saas billing Edge Function", "merged_at": "2026-07-28T09:21:27Z" },
+          { "number": 32, "title": "feat(0-mvp): step 2c — saas public pages + README + tests", "merged_at": "2026-07-23T10:32:33Z" }
+        ],
+        "closed_not_merged": [
+          { "number": 22, "title": "feat(0-mvp): step 2 — template-saas" },
+          { "number": 26, "title": "feat(0-mvp): step 2 — template-saas" }
+        ],
+        "note": "PR #31 (step 2b saas billing Edge Function) and PR #32 (step 2c saas public pages + README + tests) shipped step 2. PR #22/#26 were earlier saas attempts closed without merge."
+      },
+      "post_merge_hardening": {
+        "owasp_fixes_count": 14,
+        "fix_prs": [35, 36, 37],
+        "saas_followup_branches": ["fix/ci-saas-followup-clean", "fix/ci-saas-followup-criticals"],
+        "local_commits_on_main": ["eaa4e15", "6262681", "5b92298", "ddf5bcd"],
+        "summary": "After landing #32, OWASP-driven security sweeps applied 14 fixes to the saas Edge Function (A01 admin role + audit, A03 lockfile, A06 rate-limit + turnstile binding, A07 Toss Basic auth, A09 log redaction + audit table, A10 tri-state + durable retry + duplicate fail-closed). ddf5bcd added the regression-test suite for all 14 fixes.",
+        "rls_safety_patch": {
+          "merged_pr": 34,
+          "merged_at": "2026-07-30T00:00:00Z",
+          "note": "migrations-only RLS safety patch (actor_id validation, audit_log append-only via BEFORE UPDATE/DELETE trigger, claim_toss_billing_key_cleanup function, anon pricing read scope) — landed after the worktree was created; reflected in totals."
+        }
+      },
+      "output_ref": "phases/0-mvp/step2-output.json",
+      "summary": "plans/subscriptions/payments schema + admin pricing UI + Toss billing-key Edge Function; AC1-AC4 PASS on main (AC5 test suite REMOVED from this sub-PR, restored via ddf5bcd follow-up; AC6 supabase db reset DEFERRED_TO_CI); 14 OWASP fixes applied post-merge; RLS safety patch #34 landed."
+    },
+    {
+      "step": 3,
+      "name": "template-shop",
+      "title": "shop template: products/orders schema (pgsodium TDE on shipping), admin pricing UI, Toss single-payment Edge Function",
+      "status": "blocked",
+      "ambiguity_delta": 0.0,
+      "exit_code": 0,
+      "branch": "plan/boilerplate-cli-step3",
+      "build_sha": "702e78b",
+      "pr": { "number": 7, "state": "CLOSED", "closed_at": "2026-07-16T13:00:11Z" },
+      "output_ref": "phases/0-mvp/step3-output.json",
+      "blocked_reason": "Build succeeded (exit_code 0, AC1-AC6 PASS); PR #7 was closed without merge on 2026-07-16. Build artifacts intact on plan/boilerplate-cli-step3 (tip 702e78b, step3-output.json in working tree). Action needed: re-open PR #7 or open a new PR to ship step 3 to main."
+    },
+    {
+      "step": 4,
+      "name": "template-portfolio",
+      "title": "portfolio template: portfolio_items + guestbook schema, MDX render, Google-auth write — no payment, no Turnstile",
+      "status": "blocked",
+      "ambiguity_delta": 0.0,
+      "exit_code": 0,
+      "branch": "plan/boilerplate-cli-step4",
+      "build_sha": "10f6808",
+      "pr": { "number": 8, "state": "CLOSED", "closed_at": "2026-07-16T13:00:13Z" },
+      "output_ref": "phases/0-mvp/step4-output.json",
+      "blocked_reason": "Build succeeded (exit_code 0, AC1-AC5 PASS, AC6 supabase db reset DEFERRED_TO_CI); PR #8 was closed without merge on 2026-07-16. Build artifacts intact on plan/boilerplate-cli-step4 (tip 10f6808, step4-output.json in working tree). Action needed: re-open PR #8 or open a new PR to ship step 4 to main."
+    },
+    {
+      "step": 5,
+      "name": "cloudflare-waf",
+      "title": "Cloudflare WAF rules JSON + Turnstile config snippets for saas + shop",
+      "status": "blocked",
+      "ambiguity_delta": 0.0,
+      "exit_code": 0,
+      "branch": "plan/boilerplate-cli-step5",
+      "build_sha": "c0edcce",
+      "pr": { "number": 9, "state": "CLOSED", "closed_at": "2026-07-16T13:00:15Z" },
+      "output_ref": "phases/0-mvp/step5-output.json",
+      "blocked_reason": "Build succeeded (exit_code 0, AC1-AC7 PASS — 6 WAF rules, saas docs reference toss-billing 11x, shop docs reference toss-pay 12x, portfolio no-Turnstile confirmed); PR #9 was closed without merge on 2026-07-16. Build artifacts intact on plan/boilerplate-cli-step5 (tip c0edcce, step5-output.json in working tree). Action needed: re-open PR #9 or open a new PR to ship step 5 to main."
+    },
+    {
+      "step": 6,
+      "name": "deploy-guide",
+      "title": "Root README + per-template deployment READMEs (Supabase, Cloudflare, Google OAuth, Toss)",
+      "status": "blocked",
+      "ambiguity_delta": 0.0,
+      "exit_code": 0,
+      "branch": "plan/boilerplate-cli-step6",
+      "build_sha": "a337005",
+      "pr": { "number": 10, "state": "CLOSED", "closed_at": "2026-07-16T13:01:01Z" },
+      "output_ref": "phases/0-mvp/step6-output.json",
+      "blocked_reason": "Build succeeded (exit_code 0, AC1-AC7 PASS — root README 4756 bytes, all 3 template READMEs have Supabase setup + Vercel/Cloudflare Pages mention, no real secrets committed); PR #10 was closed without merge on 2026-07-16. Build artifacts intact on plan/boilerplate-cli-step6 (tip a337005, step6-output.json on that branch). Action needed: re-open PR #10 or open a new PR to ship step 6 to main."
+    }
   ]
 }
