@@ -1,7 +1,9 @@
-import { createServerSupabase, createServiceSupabase } from '@boilerplate-web/shared/supabase';
+import { createServerSupabase } from '@boilerplate-web/shared/supabase';
 import { cookies } from 'next/headers';
 import { GuestbookForm } from '../../components/GuestbookForm';
+import { ServiceNotice } from '../../components/ServiceNotice';
 import { postGuestbookEntry } from './actions';
+import { getServiceClient } from '../../lib/supabase-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,8 +19,22 @@ export default async function GuestbookPage() {
     if (user) { isAuthed = true; currentUserId = user.id; }
   } catch (_) {}
 
-  const s = createServiceSupabase();
-  const { data, error } = await s.from('guestbook_entries').select('id, user_id, message, created_at').order('created_at', { ascending: false }).limit(50);
+  // Missing env must not 500 the public route — render a clear notice instead.
+  const svc = getServiceClient();
+  if (!svc.ok) {
+    return (
+      <section>
+        <h1>Guestbook</h1>
+        <ServiceNotice />
+      </section>
+    );
+  }
+
+  const { data, error } = await svc.client
+    .from('guestbook_entries')
+    .select('id, user_id, message, created_at')
+    .order('created_at', { ascending: false })
+    .limit(50);
   const entries = (error || !data ? [] : data) as Entry[];
 
   return (
