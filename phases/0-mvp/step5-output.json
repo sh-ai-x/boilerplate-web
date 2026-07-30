@@ -1,0 +1,19 @@
+{
+  "step": 5,
+  "name": "cloudflare-waf",
+  "title": "Cloudflare WAF rules JSON + Turnstile config snippets for saas + shop",
+  "exit_code": 0,
+  "stdout": "AC1 jq parses cloudflare-rules.json: PASS\nAC2 rule count: 6 (>=5): PASS\nAC3 expressions reference /functions/v1/: PASS\nAC4 no real secrets in rules: PASS\nAC5 saas doc mentions 'toss-billing' 11x (>=3): PASS\nAC6 shop doc mentions 'toss-pay' 12x (>=3): PASS\nAC7 portfolio says 'no Turnstile': PASS",
+  "stderr": "",
+  "duration_seconds": 5.0,
+  "timestamp": "2026-07-17T00:34:00Z",
+  "verification": {
+    "AC1_valid_json": "PASS",
+    "AC2_rule_count_gte_5": "PASS (6)",
+    "AC3_references_edge_fn_paths": "PASS",
+    "AC4_no_real_secrets": "PASS",
+    "AC5_saas_doc_toss_billing": "PASS (11)",
+    "AC6_shop_doc_toss_pay": "PASS (12)",
+    "AC7_portfolio_no_turnstile": "PASS"
+  }
+}
