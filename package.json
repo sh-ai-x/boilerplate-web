@@ -2,16 +2,20 @@
   "name": "create-boilerplate-web",
   "version": "0.1.0",
   "description": "Scaffold a Next.js + Supabase + Cloudflare + Toss template (saas, shop, or portfolio) into a target folder.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sh-ai-x/boilerplate-web.git"
+  },
   "bin": {
-    "create-boilerplate-web": "cli/index.js"
+    "create-boilerplate-web": "dist/cli.js"
   },
   "type": "commonjs",
   "main": "cli/index.js",
-  "files": [
-    "cli",
-    "README.md",
-    "templates.lock.json"
-  ],
+  "files": ["dist/**", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "test": "node --test tests/"
   },
