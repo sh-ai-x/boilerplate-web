@@ -16,7 +16,7 @@ export default async function ProductDetail({ params }: { params: { id: string }
       <h1>{p.name}</h1>
       <p>{p.description}</p>
       <p><strong>{(p.price_cents / 100).toLocaleString()} KRW</strong> · {p.stock} in stock</p>
-      <BuyButton productId={p.id} />
+      <BuyButton productId={p.id} productName={p.name} priceCents={p.price_cents} />
     </section>
   );
 }

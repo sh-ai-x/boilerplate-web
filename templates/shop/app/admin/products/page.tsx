@@ -6,7 +6,15 @@ export const dynamic = 'force-dynamic';
 
 interface Product { id: string; name: string; description: string | null; price_cents: number; stock: number; }
 
-async function requireAdminOrRedirect(): Promise<void> {
+/**
+ * In-action admin gate. Page-level `requireAdminOrRedirect` only guards the
+ * render path. Server Actions can be invoked via direct POST (e.g. fetch from
+ * a crafted page), bypassing the page guard. We therefore re-verify the
+ * session INSIDE the action: `auth.getUser()` confirms the cookie/header
+ * session, and `auth.jwt() ->> 'role' = 'admin'` rejects non-admins. The
+ * service-role client used for the mutation would otherwise bypass RLS.
+ */
+async function requireAdmin(): Promise<void> {
   const c = cookies();
   const s = createServerSupabase({ get: (n) => c.get(n), set: (n, v, o) => c.set(n, v, o as never) });
   const { data: { user } } = await s.auth.getUser();
@@ -24,6 +32,10 @@ async function fetchProducts(): Promise<Product[]> {
 
 async function upsertProduct(formData: FormData): Promise<void> {
   'use server';
+  // Re-check admin role inside the action. Page-level guard alone is
+  // insufficient: a direct POST to this action's endpoint bypasses it.
+  await requireAdmin();
+
   const s = createServiceSupabase();
   const id = (formData.get('id') as string) || undefined;
   const payload = {
@@ -32,12 +44,21 @@ async function upsertProduct(formData: FormData): Promise<void> {
     price_cents: Number(formData.get('price_cents') ?? 0),
     stock: Number(formData.get('stock') ?? 0),
   };
-  if (id) await s.from('products').update(payload).eq('id', id);
-  else await s.from('products').insert(payload);
+  if (!payload.name) redirect('/admin/products?error=name_required');
+  if (!Number.isFinite(payload.price_cents) || payload.price_cents < 1) redirect('/admin/products?error=invalid_price');
+  if (!Number.isFinite(payload.stock) || payload.stock < 0) redirect('/admin/products?error=invalid_stock');
+
+  if (id) {
+    const { error } = await s.from('products').update(payload).eq('id', id);
+    if (error) redirect(`/admin/products?error=${encodeURIComponent(error.message)}`);
+  } else {
+    const { error } = await s.from('products').insert(payload);
+    if (error) redirect(`/admin/products?error=${encodeURIComponent(error.message)}`);
+  }
 }
 
 export default async function AdminProducts() {
-  await requireAdminOrRedirect();
+  await requireAdmin();
   const products = await fetchProducts();
   return (
     <section>

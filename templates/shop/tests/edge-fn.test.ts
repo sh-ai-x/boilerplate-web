@@ -3,10 +3,13 @@ import { readFileSync } from 'node:fs';
 
 const FN_PATH = new URL('../supabase/functions/toss-pay/index.ts', import.meta.url);
 const SQL_PATH = new URL('../supabase/migrations/0001_init.sql', import.meta.url);
+const SQL2_PATH = new URL('../supabase/migrations/0002_payment.sql', import.meta.url);
+const ADMIN_PAGE_PATH = new URL('../app/admin/products/page.tsx', import.meta.url);
 
 describe('toss-pay Edge Function (PRD contract)', () => {
   it('does not pass body.amount/price to Toss (AC4)', () => {
     const src = readFileSync(FN_PATH, 'utf8');
+    // Toss receives the price fetched from products.price_cents, never body.amount/price.
     expect(src).not.toMatch(/amount:\s*body\.(amount|price)/);
     expect(src).not.toMatch(/amount:\s*req\.body\.(amount|price)/);
   });
@@ -25,7 +28,6 @@ describe('toss-pay Edge Function (PRD contract)', () => {
     const sql = readFileSync(SQL_PATH, 'utf8');
     expect(sql).toMatch(/encrypted_phone\s+bytea/);
     expect(sql).toMatch(/encrypted_address\s+bytea/);
-    // Make sure there's no 'encrypted_phone text' or 'encrypted_address text'.
     expect(sql).not.toMatch(/encrypted_phone\s+text/);
     expect(sql).not.toMatch(/encrypted_address\s+text/);
   });
