@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "step": 4,
+  "name": "readme-install-instructions",
+  "branch": "plan/boilerplate-cli-distribution-step4",
+  "exit_code": 0,
+  "stdout": "$ head -20 README.md | grep -E 'npx create-boilerplate-web'\n> `npx create-boilerplate-web <folder> --type=<saas|shop|portfolio>` —\nexit=0\n\n$ head -20 README.md | grep -E -- '--type=<saas|shop|portfolio>'\n> `npx create-boilerplate-web <folder> --type=<saas|shop|portfolio>` —\nexit=0\n\n$ grep -E 'npmjs.com/package/create-boilerplate-web' README.md\nLatest release: [the latest release lives at https://www.npmjs.com/package/create-boilerplate-web](https://www.npmjs.com/package/create-boilerplate-web).\nexit=0",
+  "stderr": "",
+  "duration_seconds": 2,
+  "timestamp": "2026-07-30T16:13:49Z",
+  "verification": {
+    "AC5": {
+      "command": "head -20 README.md | grep -E 'npx create-boilerplate-web'",
+      "exit_code": 0,
+      "passed": true,
+      "stdout_tail": "> `npx create-boilerplate-web <folder> --type=<saas|shop|portfolio>` —"
+    },
+    "AC5_typename": {
+      "command": "head -20 README.md | grep -E -- '--type=<saas|shop|portfolio>'",
+      "exit_code": 0,
+      "passed": true,
+      "stdout_tail": "> `npx create-boilerplate-web <folder> --type=<saas|shop|portfolio>` —"
+    },
+    "AC5.1": {
+      "command": "grep -E 'npmjs.com/package/create-boilerplate-web' README.md",
+      "exit_code": 0,
+      "passed": true,
+      "stdout_tail": "Latest release: [the latest release lives at https://www.npmjs.com/package/create-boilerplate-web](https://www.npmjs.com/package/create-boilerplate-web)."
+    }
+  },
+  "notes": "Inserted a single 'Latest release' markdown link line at line 6 of README.md, immediately after the opening npx blockquote (line 4) and before the existing 'This repo is the source-of-truth...' paragraph (line 8). The link text reads: 'the latest release lives at https://www.npmjs.com/package/create-boilerplate-web' and points to https://www.npmjs.com/package/create-boilerplate-web (literal https:// prefix satisfies AC5.1 grep regex). Existing sections preserved: '## Template matrix' (1 match), '## Env-var matrix' (1 match), '## Architecture' (1 match, ASCII diagram intact at lines ~60-83), '## Security non-goals (links)' (1 match)."
+}
