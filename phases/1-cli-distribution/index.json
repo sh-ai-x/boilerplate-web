@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0.0",
+  "phase": "1-cli-distribution",
+  "project": "boilerplate-web",
+  "created_at": "2026-07-30T00:00:00Z",
+  "worktree": "plan/boilerplate-cli-distribution-step2",
+  "ambiguity_score": 2,
+  "value_score": 125.0,
+  "evidence_count": 3,
+  "totals": {
+    "completed": 1,
+    "blocked": 0,
+    "pending": 5,
+    "completion_pct": 16
+  },
+  "steps": [
+    {
+      "step": 0,
+      "name": "npm-package-config",
+      "title": "Finalize npm package config (bin, files, publishConfig, name)",
+      "status": "pending",
+      "ambiguity_delta": 0.0
+    },
+    {
+      "step": 1,
+      "name": "cli-bundle-build",
+      "title": "Bundle cli/ into dist/cli.js via tsc/esbuild",
+      "status": "pending",
+      "ambiguity_delta": 0.0
+    },
+    {
+      "step": 2,
+      "name": "ci-publish-workflow",
+      "title": ".github/workflows/publish.yml with OIDC trusted publishing",
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "completed_at": "2026-07-30T15:13:35Z",
+      "summary": ".github/workflows/publish.yml with OIDC trusted publishing (no NPM_TOKEN)"
+    },
+    {
+      "step": 3,
+      "name": "e2e-scaffold-test",
+      "title": "CI matrix: end-to-end scaffold test for saas/shop/portfolio",
+      "status": "pending",
+      "ambiguity_delta": 0.0
+    },
+    {
+      "step": 4,
+      "name": "readme-install-instructions",
+      "title": "Root README install instructions for npx create-boilerplate-web",
+      "status": "pending",
+      "ambiguity_delta": 0.0
+    },
+    {
+      "step": 5,
+      "name": "semver-tag-release",
+      "title": "Tag-trigger release flow for v0.x + release guide",
+      "status": "pending",
+      "ambiguity_delta": 0.0
+    }
+  ]
+}

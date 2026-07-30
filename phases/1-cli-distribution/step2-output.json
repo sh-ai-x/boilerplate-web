@@ -1,0 +1,30 @@
+{
+  "step": 2,
+  "name": "ci-publish-workflow",
+  "status": "completed",
+  "exit_code": 0,
+  "stdout": [
+    "AC3.1a test -f .github/workflows/publish.yml -> exit=0 (file exists)",
+    "AC3.1b grep -E 'npm publish' .github/workflows/publish.yml -> exit=0 (publish command present, with --provenance --access public)",
+    "AC3.1c grep -E 'id-token:[[:space:]]*write' .github/workflows/publish.yml -> exit=0 (OIDC id-token: write permission declared)",
+    "AC3.1d tags:['v*.*.*'] pattern check -> exit=0 (inline YAML flow-style tags: ['v*.*.*'] matches AC regex)",
+    "AC3.2  grep -E 'NPM_TOKEN|node-auth-token' -> exit=1 (no matches; OIDC only, no NPM_TOKEN env)",
+    "YAML parsed successfully via yaml.safe_load; jobs.publish.steps=6; permissions={contents:read, id-token:write}; triggers=[workflow_dispatch, push]"
+  ],
+  "stderr": "",
+  "duration_seconds": 12.0,
+  "timestamp": "2026-07-30T15:13:35Z",
+  "verification": {
+    "AC3": "PASS",
+    "AC3_1": "PASS",
+    "workflow_file_present": true,
+    "oidc_id_token_write": true,
+    "no_npm_token": true,
+    "tag_trigger_v_star_star_star": true
+  },
+  "files_created": [
+    ".github/workflows/publish.yml"
+  ],
+  "commit_message_commit1": "feat(1-cli-distribution): step 2 — .github/workflows/publish.yml with OIDC trusted publishing",
+  "commit_message_commit2": "chore(1-cli-distribution): step 2 output"
+}
