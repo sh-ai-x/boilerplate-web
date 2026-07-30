@@ -1,6 +1,6 @@
 'use strict';
 
-const USAGE = `Usage: create-boilerplate-web <targetFolder> --type=<saas|shop|portfolio> [--overwrite] [--yes] [--force] [--allow-scripts]`;
+const USAGE = `Usage: create-boilerplate-web <targetFolder> --type=<saas|shop|portfolio> [--overwrite] [--yes] [--force] [--allow-scripts] [--skip-install]`;
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -10,6 +10,7 @@ function parseArgs(argv) {
   let allowScripts = false;
   let yes = false;
   let force = false;
+  let skipInstall = false;
 
   for (const arg of args.slice(1)) {
     if (arg.startsWith('--type=')) {
@@ -34,6 +35,10 @@ function parseArgs(argv) {
       if (force) throw new Error(`--force specified more than once`);
       force = true;
     }
+    if (arg === '--skip-install') {
+      if (skipInstall) throw new Error(`--skip-install specified more than once`);
+      skipInstall = true;
+    }
   }
 
   // Reject --prefixed tokens as the positional target. We throw an
@@ -43,7 +48,7 @@ function parseArgs(argv) {
     throw new Error(`target folder must not start with "--" (got "${positional}")`);
   }
 
-  return { targetFolder: positional, type, overwrite, allowScripts, yes, force };
+  return { targetFolder: positional, type, overwrite, allowScripts, yes, force, skipInstall };
 }
 
 module.exports = { parseArgs, USAGE };

@@ -67,16 +67,24 @@ test('buildSrc reads source + ref + subdir from templates.lock.json (SSOT, behav
 });
 
 // === downloadTemplate — behavioral with injected degit ===
+//
+// These tests exercise the degit (github: source) code path. They pass
+// `localTemplate: false` to bypass the in-repo local-copy fast path
+// that downloadTemplate added for offline CI usage. The fast path is
+// covered by the e2e scaffold script (scripts/e2e-scaffold-test.sh).
 test('downloadTemplate rejects invalid type before any degit call (AC3, behavioral)', async () => {
   let called = false;
   const fakeDegit = () => ({ clone: () => { called = true; return Promise.resolve(); } });
-  await assert.rejects(() => downloadTemplate('invalid', '/tmp/cbw-x', { degitImpl: fakeDegit }), /Invalid --type/);
+  await assert.rejects(
+    () => downloadTemplate('invalid', '/tmp/cbw-x', { localTemplate: false, degitImpl: fakeDegit }),
+    /Invalid --type/
+  );
   assert.equal(called, false);
 });
 
 test('downloadTemplate defaults to force:false (A06-3, behavioral)', async () => {
   let capturedOpts = null;
-  await downloadTemplate('saas', '/tmp/cbw-y', { degitImpl: (src, opts) => {
+  await downloadTemplate('saas', '/tmp/cbw-y', { localTemplate: false, degitImpl: (src, opts) => {
     capturedOpts = opts;
     return { clone: () => Promise.resolve() };
   } });
@@ -85,7 +93,7 @@ test('downloadTemplate defaults to force:false (A06-3, behavioral)', async () =>
 
 test('downloadTemplate respects opts.force === true (A06-3, behavioral)', async () => {
   let capturedOpts = null;
-  await downloadTemplate('saas', '/tmp/cbw-z', { force: true, degitImpl: (src, opts) => {
+  await downloadTemplate('saas', '/tmp/cbw-z', { localTemplate: false, force: true, degitImpl: (src, opts) => {
     capturedOpts = opts;
     return { clone: () => Promise.resolve() };
   } });
@@ -107,7 +115,7 @@ test('downloadTemplate returns a typed Error for missing degit (behavioral)', as
   };
   try {
     await assert.rejects(
-      () => downloadTemplate('saas', '/tmp/cbw-m', {}),
+      () => downloadTemplate('saas', '/tmp/cbw-m', { localTemplate: false }),
       /Missing dependency/,
     );
   } finally {

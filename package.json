@@ -13,7 +13,9 @@
     "templates.lock.json"
   ],
   "scripts": {
-    "test": "node --test tests/"
+    "build:cli": "node scripts/build-cli.js",
+    "test": "node --test tests/",
+    "test:scaffold": "bash scripts/e2e-scaffold-test.sh"
   },
   "keywords": [
     "boilerplate",
@@ -30,6 +32,9 @@
   },
   "dependencies": {
     "degit": "2.8.4"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
   },
   "license": "MIT"
 }

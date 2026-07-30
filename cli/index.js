@@ -26,7 +26,7 @@ async function main() {
     }
   }
 
-  const { targetFolder, type, overwrite, allowScripts, yes, force } = parseArgs(process.argv);
+  const { targetFolder, type, overwrite, allowScripts, yes, force, skipInstall } = parseArgs(process.argv);
 
   if (!targetFolder) {
     process.stderr.write(`Error: missing <targetFolder>\n${USAGE}\n`);
@@ -75,13 +75,17 @@ async function main() {
       const newName = rewritePackageName(safeTarget);
       process.stdout.write(`Renamed package.json "name" to "${newName}"\n`);
     },
-    async () => {
-      installDeps(safeTarget, { allowScripts });
-    },
-    async () => {
-      const checklist = formatPostInstallChecklist(type);
-      if (checklist) process.stdout.write(checklist);
-    },
+    ...(skipInstall
+      ? []
+      : [
+          async () => {
+            installDeps(safeTarget, { allowScripts });
+          },
+          async () => {
+            const checklist = formatPostInstallChecklist(type);
+            if (checklist) process.stdout.write(checklist);
+          },
+        ]),
   ]);
 }
 

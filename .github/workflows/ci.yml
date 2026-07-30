@@ -52,3 +52,29 @@ jobs:
           python-version: "3.12"
       - name: Run validation suite
         run: python3 scripts/validate.py
+
+  # E2E scaffold matrix (step 3 of phases/1-cli-distribution). Runs the
+  # bundled CLI against a fresh /tmp target for every supported type.
+  # Cross-platform: ubuntu-latest only. The script invokes npm install
+  # internally only for degit's transitive deps (none in practice — we
+  # use the in-repo templates fast path, see cli/lib/target-download.js),
+  # so this job does NOT touch the public npm registry. The e2e script
+  # uses --skip-install to keep it fully offline.
+  scaffold:
+    name: scaffold (${{ matrix.type }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        type: ['saas', 'shop', 'portfolio']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dev dependencies (esbuild, degit)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run e2e scaffold test (${{ matrix.type }})
+        run: npm run test:scaffold -- ${{ matrix.type }}
