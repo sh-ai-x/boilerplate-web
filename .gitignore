@@ -17,3 +17,6 @@ logs/
 __pycache__/
 
 .tmp-tests
+
+# Build artifacts (esbuild bundle output from scripts/build-cli.js).
+dist/

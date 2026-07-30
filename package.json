@@ -17,6 +17,8 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
+    "build:cli": "node scripts/build-cli.js",
+    "prepublishOnly": "npm run build:cli",
     "test": "node --test tests/"
   },
   "keywords": [
@@ -35,5 +37,8 @@
   "dependencies": {
     "degit": "2.8.4"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "0.21.5"
+  }
 }
