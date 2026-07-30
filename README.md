@@ -45,15 +45,15 @@ rewrites the target `package.json` name to the folder basename, runs
 
 ## Env-var matrix
 
-| Env var                          | Used by                  | Required?           |
-|----------------------------------|--------------------------|---------------------|
-| `NEXT_PUBLIC_SUPABASE_URL`       | all 3 templates          | Yes                 |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | all 3 templates          | Yes                 |
-| `SUPABASE_SERVICE_ROLE_KEY`      | saas, shop (admin paths) | Yes                 |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | saas, shop               | saas+shop only      |
-| `TURNSTILE_SECRET_KEY`           | saas, shop               | saas+shop only      |
-| `TOSS_SECRET_KEY`                | saas, shop               | saas+shop only      |
-| `TOSS_AUTH_KEY`                  | saas                     | saas only           |
+| Env var                          | Used by                          | Required?      |
+|----------------------------------|----------------------------------|----------------|
+| `NEXT_PUBLIC_SUPABASE_URL`       | all 3 templates                  | Yes            |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | all 3 templates                  | Yes            |
+| `SUPABASE_SERVICE_ROLE_KEY`      | saas, shop, portfolio (admin paths) | Yes         |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | saas, shop                       | saas+shop only |
+| `TURNSTILE_SECRET_KEY`           | saas, shop                       | saas+shop only |
+| `TOSS_SECRET_KEY`                | saas, shop                       | saas+shop only |
+| `TOSS_AUTH_KEY`                  | saas                             | saas only      |
 
 ## Architecture
 
@@ -87,10 +87,12 @@ rewrites the target `package.json` name to the folder basename, runs
 Per the PRD non-goals, this boilerplate deliberately does **NOT** include:
 
 1. Email/password or magic-link authentication. Google OAuth is the only
-   sign-in path. See `.prd/decision-log.md` §3 non-goal #1.
-2. Payment providers beyond Toss. See `.prd/decision-log.md` §3 non-goal #2.
+   sign-in path. See
+   [.prd/decision-log.md §3 non-goal #1](.prd/decision-log.md#gate-3-non-goals).
+2. Payment providers beyond Toss. See
+   [.prd/decision-log.md §3 non-goal #2](.prd/decision-log.md#gate-3-non-goals).
 3. Multi-tenant Supabase. Each user brings their own Supabase project. See
-   `.prd/decision-log.md` §3 non-goal #3.
+   [.prd/decision-log.md §3 non-goal #3](.prd/decision-log.md#gate-3-non-goals).
 
 ## License
 

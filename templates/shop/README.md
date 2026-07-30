@@ -41,6 +41,15 @@ $$;
 - The Edge Function does the single-payment confirm. The amount comes from
   `products.price_cents` (DB), never from the request body.
 
+## Deployment (Vercel or Cloudflare Pages)
+Both Vercel and Cloudflare Pages are supported deployment targets for this
+template. Set the required env vars (`NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+`NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TOSS_SECRET_KEY`)
+in the deploy dashboard under Environment Variables. See
+`templates/_shared/.env.example` for the canonical list. The Cloudflare WAF
+rules (`cloudflare-rules.json` from step 5) are recommended for production.
+
 ## Architecture invariants
 - **No Toss code in `app/`.** The Edge Function is the only Toss call site.
   This is enforced by `grep -r toss app/` in CI.
