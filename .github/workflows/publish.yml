@@ -1,0 +1,64 @@
+name: Publish CLI to npm
+
+# Publish the create-boilerplate-web CLI to npm via OIDC trusted publishing.
+# Triggers:
+#   - workflow_dispatch (manual ad-hoc release)
+#   - push of a semver tag v*.*.* (auto-release on tag push)
+#
+# Auth: OIDC trusted publishing only. The job declares `id-token: write`
+# and runs `npm publish --provenance --access public`; npm's OIDC token
+# exchange handles authentication. No long-lived auth secret is referenced
+# or required. See https://docs.npmjs.com/generating-provenance-statements
+# and https://docs.npmjs.com/trusted-publishers for the publisher contract.
+#
+# OIDC requires the workflow to run on the canonical repo (fork PRs would
+# be rejected by the npm token exchange). Both triggers above meet that
+# constraint: workflow_dispatch is operator-initiated on main, and
+# tag-pushes happen on the canonical repo.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*.*.*']
+
+# Per-tag concurrency: serial publish per release; cancel superseded runs
+# for the same tag (e.g. a follow-up commit moved the tag) so the latest
+# build wins.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI bundle
+        run: npm run build:cli
+
+      - name: Publish to npm (OIDC trusted publishing)
+        env:
+          # Required so `npm publish` can correlate the tag with the
+          # version we want to ship. On tag pushes github.ref_name is
+          # the tag (e.g. v0.2.0); on workflow_dispatch it falls back
+          # to the package.json version.
+          NPM_CONFIG_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+        run: npm publish --provenance --access public
