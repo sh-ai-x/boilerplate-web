@@ -3,7 +3,7 @@
   "phase": "1-cli-distribution",
   "project": "boilerplate-web",
   "created_at": "2026-07-30T00:00:00Z",
-  "worktree": "plan/boilerplate-cli-distribution",
+  "worktree": "plan/boilerplate-cli-distribution-step2",
   "ambiguity_score": 2,
   "value_score": 125.0,
   "evidence_count": 3,
@@ -25,17 +25,17 @@
       "step": 1,
       "name": "cli-bundle-build",
       "title": "Bundle cli/ into dist/cli.js via tsc/esbuild",
-      "status": "completed",
-      "completed_at": "2026-07-30T15:09:07Z",
-      "summary": "esbuild bundles cli/ into dist/cli.js (executable, reports size)",
+      "status": "pending",
       "ambiguity_delta": 0.0
     },
     {
       "step": 2,
       "name": "ci-publish-workflow",
       "title": ".github/workflows/publish.yml with OIDC trusted publishing",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "completed_at": "2026-07-30T15:13:35Z",
+      "summary": ".github/workflows/publish.yml with OIDC trusted publishing (no NPM_TOKEN)"
     },
     {
       "step": 3,
