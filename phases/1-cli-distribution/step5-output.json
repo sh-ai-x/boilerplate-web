@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "step": 5,
+  "name": "semver-tag-release",
+  "branch": "plan/boilerplate-cli-distribution-step5",
+  "exit_code": 0,
+  "stdout": "=== AC6: gitignore dist ===\ndist/\nAC6_EXIT=0\n\n=== AC6.1 semver ===\ndevelopment** on `main`: every release is a semver tag pushed to `main`, and\n## 1. Decide the next semver bump\n`package.json` ships as `0.1.0` and evolves under semver rules:\n| patch | Backwards-compatible bug fixes (default for `0.0.x` \u2192 `0.0.y`).      |\n| minor | New backwards-compatible functionality (default for `0.x.0` \u2192 `0.y`). |\n| major | Breaking changes to CLI flags, output shape, or template layout.    |\nFor the `0.x` line we treat every release as either `patch` (bug fix) or\n`minor` (new template / new behavior); reserve `major` for a true, breaking\n1. **Bump version in `package.json`** to `v0.X.Y` per semver (see the table\n   # example for a minor bump 0.1.0 -> 0.2.0\n   npm version minor --no-git-tag-version\n   If it is not, see the `workflow_dispatch` fallback below.\n## 3. Manual `workflow_dispatch` fallback (recovery only)\nThe publish workflow also declares a `workflow_dispatch` event. Trigger it\nThe `workflow_dispatch` run executes the exact same job body as the tag push:\nre-running via `workflow_dispatch`.\nAC6.1_SEMVER_EXIT=0\n\n=== AC6.1 gittag ===\n   git tag v0.X.Y\n   If it is not, see the `workflow_dispatch` fallback below.\n## 3. Manual `workflow_dispatch` fallback (recovery only)\nThe publish workflow also declares a `workflow_dispatch` event. Trigger it\nThe `workflow_dispatch` run executes the exact same job body as the tag push:\nre-running via `workflow_dispatch`.\nAC6.1_GITTAG_EXIT=0\n",
+  "stderr": "",
+  "duration_seconds": 12,
+  "timestamp": "2026-07-30T16:17:29Z",
+  "verification": {
+    "AC6": {
+      "command": "grep -E '^dist/?\\$' .gitignore",
+      "exit_code": 0,
+      "passed": true,
+      "stdout_tail": "dist/"
+    },
+    "AC6.1_semver": {
+      "command": "grep -E 'semver|patch|minor|major' .github/RELEASING.md",
+      "exit_code": 0,
+      "passed": true,
+      "stdout_tail": "semver / patch / minor / major all present in .github/RELEASING.md"
+    },
+    "AC6.1_gittag": {
+      "command": "grep -E 'git tag|workflow_dispatch' .github/RELEASING.md",
+      "exit_code": 0,
+      "passed": true,
+      "stdout_tail": "git tag v0.X.Y and workflow_dispatch fallback both documented"
+    }
+  },
+  "notes": "Step 5 scope: add dist/ to .gitignore (build artifact; shipped via npm files allow-list, not git history) and author .github/RELEASING.md describing the trunk-based semver tag-on-main flow + workflow_dispatch fallback. publish.yml is out of scope here (belongs to step 2). All three AC commands (AC6 + both AC6.1 greps) exit 0. No changes to templates/_shared/, templates/saas/, templates/shop/, templates/portfolio/ (scope freeze honored)."
+}
