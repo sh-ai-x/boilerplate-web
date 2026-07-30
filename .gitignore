@@ -17,3 +17,7 @@ logs/
 __pycache__/
 
 .tmp-tests
+
+# Build artifact (regenerated per release via `npm run build:cli`; shipped via
+# the npm `files` allow-list in package.json, never via git history)
+dist/
