@@ -4,16 +4,17 @@
   "project": "boilerplate-web",
   "created_at": "2026-07-16T00:00:00Z",
   "updated_at": "2026-07-30T00:00:00Z",
-  "worktree": "docs/phase-index-2026-07-30",
-  "based_on_main_sha": "b79324b",
+  "finalized_at": "2026-07-30T09:36:10Z",
+  "worktree": "docs/0-mvp-index-final-2026-07-30",
+  "based_on_main_sha": "c5ff035",
   "ambiguity_score": 2,
   "value_score": 9.375,
   "evidence_count": 7,
   "totals": {
-    "completed": 3,
-    "blocked": 4,
+    "completed": 7,
+    "blocked": 0,
     "pending": 0,
-    "completion_pct": 43
+    "completion_pct": 100
   },
   "steps": [
     {
@@ -54,7 +55,7 @@
       "pr": {
         "merged": [
           { "number": 31, "title": "feat(0-mvp): step 2b — saas billing Edge Function", "merged_at": "2026-07-28T09:21:27Z" },
-          { "number": 32, "title": "feat(0-mvp): step 2c — saas public pages + README + tests", "merged_at": "2026-07-23T10:32:33Z" }
+          { "number": 32, "title": "feat(0-mvp): step 2c — saas public pages + README + tests", "merged_at": "2026-07-28T10:33:11Z" }
         ],
         "closed_not_merged": [
           { "number": 22, "title": "feat(0-mvp): step 2 — template-saas" },
@@ -67,12 +68,8 @@
         "fix_prs": [35, 36, 37],
         "saas_followup_branches": ["fix/ci-saas-followup-clean", "fix/ci-saas-followup-criticals"],
         "local_commits_on_main": ["eaa4e15", "6262681", "5b92298", "ddf5bcd"],
-        "summary": "After landing #32, OWASP-driven security sweeps applied 14 fixes to the saas Edge Function (A01 admin role + audit, A03 lockfile, A06 rate-limit + turnstile binding, A07 Toss Basic auth, A09 log redaction + audit table, A10 tri-state + durable retry + duplicate fail-closed). ddf5bcd added the regression-test suite for all 14 fixes.",
-        "rls_safety_patch": {
-          "merged_pr": 34,
-          "merged_at": "2026-07-30T00:00:00Z",
-          "note": "migrations-only RLS safety patch (actor_id validation, audit_log append-only via BEFORE UPDATE/DELETE trigger, claim_toss_billing_key_cleanup function, anon pricing read scope) — landed after the worktree was created; reflected in totals."
-        }
+        "rls_safety_patch_pr": 34,
+        "summary": "After landing #32, OWASP-driven security sweeps applied 14 fixes to the saas Edge Function (A01 admin role + audit, A03 lockfile, A06 rate-limit + turnstile binding, A07 Toss Basic auth, A09 log redaction + audit table, A10 tri-state + durable retry + duplicate fail-closed). ddf5bcd added the regression-test suite for all 14 fixes. PR #34 added the migrations-only RLS safety patch (actor_id validation, audit_log append-only via BEFORE UPDATE/DELETE trigger, claim_toss_billing_key_cleanup function, anon pricing read scope)."
       },
       "output_ref": "phases/0-mvp/step2-output.json",
       "summary": "plans/subscriptions/payments schema + admin pricing UI + Toss billing-key Edge Function; AC1-AC4 PASS on main (AC5 test suite REMOVED from this sub-PR, restored via ddf5bcd follow-up; AC6 supabase db reset DEFERRED_TO_CI); 14 OWASP fixes applied post-merge; RLS safety patch #34 landed."
@@ -81,53 +78,86 @@
       "step": 3,
       "name": "template-shop",
       "title": "shop template: products/orders schema (pgsodium TDE on shipping), admin pricing UI, Toss single-payment Edge Function",
-      "status": "blocked",
+      "status": "completed",
       "ambiguity_delta": 0.0,
       "exit_code": 0,
       "branch": "plan/boilerplate-cli-step3",
       "build_sha": "702e78b",
-      "pr": { "number": 7, "state": "CLOSED", "closed_at": "2026-07-16T13:00:11Z" },
+      "delivered_via": {
+        "pr": { "number": 39, "state": "MERGED", "merged_at": "2026-07-30T08:12:25Z", "title": "feat(0-mvp): step 3 — shop template (products/orders + pgsodium TDE, Toss single-payment Edge Function)" },
+        "route_note": "Original PR #7 (closed 2026-07-16 without merge — phantom 0-diff vs stale base). PR #39 re-targeted plan/boilerplate-cli-step3 against main; 7 review blockers (3 critical + 4 major) were resolved in-place before merge: in-action admin check via requireAdmin(), real Toss Payments SDK contract (paymentKey/orderId returned by Toss JS SDK, confirmed server-side), pgsodium.create_key() provisioning per shipping_keys row, transactional persistence (create_pending_order -> finalize_payment -> cancel_pending_order), atomic inventory (UPDATE ... WHERE stock > 0), RLS on shipping_keys."
+      },
       "output_ref": "phases/0-mvp/step3-output.json",
-      "blocked_reason": "Build succeeded (exit_code 0, AC1-AC6 PASS); PR #7 was closed without merge on 2026-07-16. Build artifacts intact on plan/boilerplate-cli-step3 (tip 702e78b, step3-output.json in working tree). Action needed: re-open PR #7 or open a new PR to ship step 3 to main."
+      "summary": "products/orders/shipping_addresses schema (shipping columns bytea, encrypted via pgsodium.crypto_aead_det_encrypt), admin pricing UI (stock CRUD), Toss single-payment Edge Function. AC1-AC6 PASS on main; 23/23 tests (18 new regression tests). Review verdict: Approve; merged 2026-07-30T08:12:25Z."
     },
     {
       "step": 4,
       "name": "template-portfolio",
       "title": "portfolio template: portfolio_items + guestbook schema, MDX render, Google-auth write — no payment, no Turnstile",
-      "status": "blocked",
+      "status": "completed",
       "ambiguity_delta": 0.0,
       "exit_code": 0,
       "branch": "plan/boilerplate-cli-step4",
       "build_sha": "10f6808",
-      "pr": { "number": 8, "state": "CLOSED", "closed_at": "2026-07-16T13:00:13Z" },
+      "delivered_via": {
+        "pr": { "number": 40, "state": "MERGED", "merged_at": "2026-07-30T08:12:48Z", "title": "feat(0-mvp): step 4 — portfolio template (portfolio_items + guestbook, MDX render, Google-auth write)" },
+        "route_note": "Original PR #8 (closed 2026-07-16 without merge). PR #40 re-targeted plan/boilerplate-cli-step4 against main; 2 review blockers were resolved in-place before merge: MDX render errors wrapped in try/catch with <pre data-testid='mdx-fallback'> fallback UI, getServiceClient() pre-checks env vars + wraps createServiceSupabase() with ServiceNotice UI."
+      },
       "output_ref": "phases/0-mvp/step4-output.json",
-      "blocked_reason": "Build succeeded (exit_code 0, AC1-AC5 PASS, AC6 supabase db reset DEFERRED_TO_CI); PR #8 was closed without merge on 2026-07-16. Build artifacts intact on plan/boilerplate-cli-step4 (tip 10f6808, step4-output.json in working tree). Action needed: re-open PR #8 or open a new PR to ship step 4 to main."
+      "summary": "portfolio_items/guestbook_entries schema + MDX render (next-mdx-remote/rsc v5) + Google-OAuth write path. AC1-AC5 PASS on main; 14/14 tests (8 new regression tests). Review verdict: Approve; merged 2026-07-30T08:12:48Z."
     },
     {
       "step": 5,
       "name": "cloudflare-waf",
       "title": "Cloudflare WAF rules JSON + Turnstile config snippets for saas + shop",
-      "status": "blocked",
+      "status": "completed",
       "ambiguity_delta": 0.0,
       "exit_code": 0,
       "branch": "plan/boilerplate-cli-step5",
       "build_sha": "c0edcce",
-      "pr": { "number": 9, "state": "CLOSED", "closed_at": "2026-07-16T13:00:15Z" },
+      "delivered_via": {
+        "pr": { "number": 41, "state": "MERGED", "merged_at": "2026-07-30T08:13:16Z", "title": "feat(0-mvp): step 5 — Cloudflare WAF rules + Turnstile config snippets (saas + shop)" },
+        "route_note": "Original PR #9 (closed 2026-07-16 without merge). PR #41 re-targeted plan/boilerplate-cli-step5 against main; cleanly rebased (5 files, no conflicts, no review blockers)."
+      },
       "output_ref": "phases/0-mvp/step5-output.json",
-      "blocked_reason": "Build succeeded (exit_code 0, AC1-AC7 PASS — 6 WAF rules, saas docs reference toss-billing 11x, shop docs reference toss-pay 12x, portfolio no-Turnstile confirmed); PR #9 was closed without merge on 2026-07-16. Build artifacts intact on plan/boilerplate-cli-step5 (tip c0edcce, step5-output.json in working tree). Action needed: re-open PR #9 or open a new PR to ship step 5 to main."
+      "summary": "cloudflare-rules.json (6 WAF rules: rate-limit toss-billing 10/min, rate-limit toss-pay 10/min, UA-required on Edge Fn paths, KR/US/JP geo-allowlist, managed-challenge on /admin/* without cf_clearance), per-template Turnstile config snippets (saas, shop, portfolio). AC1-AC7 PASS on main; merged 2026-07-30T08:13:16Z."
     },
     {
       "step": 6,
       "name": "deploy-guide",
       "title": "Root README + per-template deployment READMEs (Supabase, Cloudflare, Google OAuth, Toss)",
-      "status": "blocked",
+      "status": "completed",
       "ambiguity_delta": 0.0,
       "exit_code": 0,
       "branch": "plan/boilerplate-cli-step6",
       "build_sha": "a337005",
-      "pr": { "number": 10, "state": "CLOSED", "closed_at": "2026-07-16T13:01:01Z" },
+      "delivered_via": {
+        "pr": { "number": 42, "state": "MERGED", "merged_at": "2026-07-30T09:36:10Z", "title": "feat(0-mvp): step 6 — root README + per-template deploy READMEs (Supabase / Cloudflare / Google OAuth / Toss)" },
+        "route_note": "Original PR #10 (closed 2026-07-16 without merge). PR #42 re-targeted plan/boilerplate-cli-step6 against main. Conflict on shop/README.md + portfolio/README.md resolved by taking main (those READMEs already shipped via PR #39/#40). After merge, 7 follow-up review blockers (F1/F2/F3/F6/F7 documentation gaps) were resolved in commit ed70b07; review re-triggered via empty commit 843671e and the second review run approved."
+      },
       "output_ref": "phases/0-mvp/step6-output.json",
-      "blocked_reason": "Build succeeded (exit_code 0, AC1-AC7 PASS — root README 4756 bytes, all 3 template READMEs have Supabase setup + Vercel/Cloudflare Pages mention, no real secrets committed); PR #10 was closed without merge on 2026-07-16. Build artifacts intact on plan/boilerplate-cli-step6 (tip a337005, step6-output.json on that branch). Action needed: re-open PR #10 or open a new PR to ship step 6 to main."
+      "summary": "Root README (Quick-start, Template matrix, Env-var matrix with portfolio entry, ASCII architecture diagram, dependency-reproducibility call-out for A03 pnpm install --frozen-lockfile) + per-template README.md (saas, shop, portfolio) with ## Supabase setup, ## Cloudflare Turnstile, ## Deployment (Vercel or Cloudflare Pages), and the 'no Toss / no Cloudflare WAF' bullet for portfolio. AC1-AC7 PASS on main after F1/F2/F6/F7 doc-gaps fixed; merged 2026-07-30T09:36:10Z."
     }
-  ]
+  ],
+  "closeout": {
+    "all_steps_completed": true,
+    "completion_pct": 100,
+    "completed_at": "2026-07-30T09:36:10Z",
+    "total_landed_prs": [
+      { "number": 18, "step": 0 },
+      { "number": 21, "step": 1 },
+      { "number": 31, "step": 2, "role": "step 2b - billing Edge Function" },
+      { "number": 32, "step": 2, "role": "step 2c - public pages + README + tests" },
+      { "number": 39, "step": 3 },
+      { "number": 40, "step": 4 },
+      { "number": 41, "step": 5 },
+      { "number": 42, "step": 6 }
+    ],
+    "post_merge_hardening": [
+      { "pr": 34, "scope": "saas RLS safety patch", "merged_at": "2026-07-30T09:21:27Z" },
+      { "fixes_count": 14, "scope": "saas Edge Function OWASP fixes (A01/A03/A06/A07/A09/A10)", "evidence_commits": ["eaa4e15", "6262681", "5b92298", "ddf5bcd"] },
+      { "prs": [35, 36, 37], "scope": "review/security verdict-extractor fixes" }
+    ],
+    "closeout_pr": { "branch": "docs/0-mvp-index-final-2026-07-30", "summary": "Reconciliation PR (this commit) - marks steps 3-6 as completed and updates totals." }
+  }
 }
