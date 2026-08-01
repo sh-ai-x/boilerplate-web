@@ -63,12 +63,36 @@ function buildSrc(type) {
 // Resolve the in-repo template dir (if present) relative to this file.
 // `__dirname` is `cli/lib/` in the unbundled CLI, so the in-repo layout is
 // `cli/lib/../../templates/<type>` = `<repo>/templates/<type>`.
+//
+// Containment (A05): the lockfile comes from this CLI package and is
+// trusted, but defense-in-depth means we re-validate the type BEFORE we
+// join the path, and we assert the resolved realpath is still inside the
+// CLI package root (no symlink in templates/ pointing outside).
 function localTemplateDir(type) {
   const lock = getLock();
-  const dir = path.join(__dirname, '..', '..', lock.templates[type]);
+  // Re-validate type defensively. validateType is a pure allowlist check,
+  // and the caller (downloadTemplate) already gates on it — but we re-call
+  // here so this function is safe to invoke from any entry point (tests,
+  // future callers, REPL).
+  if (!validateType(type)) return null;
+  const candidate = path.join(__dirname, '..', '..', lock.templates[type]);
+  // Resolve any symlink in the path chain. If a malicious template path
+  // escapes the package root via a symlink, the resolved realpath will
+  // land outside `path.join(__dirname, '..', '..')` and we refuse.
+  const pkgRoot = path.resolve(__dirname, '..', '..');
+  let real;
+  try {
+    real = fs.realpathSync.native(candidate);
+  } catch (_) {
+    return null;
+  }
+  const rel = path.relative(pkgRoot, real);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    return null;
+  }
   // We require package.json to exist so we don't accidentally copy an empty
   // placeholder dir as a "template".
-  if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+  if (fs.existsSync(path.join(candidate, 'package.json'))) return candidate;
   return null;
 }
 
@@ -79,24 +103,101 @@ function localTemplateDir(type) {
 // when a template lacks a .gitignore.
 const SKIP_NAMES = new Set(['node_modules', '.git', '.DS_Store']);
 
-function copyDirSync(src, dest) {
+// Resource bounds for copyDirSync (A06 — anti-DoS). A malicious or
+// compromised template could include deeply-nested dirs, very large files,
+// or millions of entries to OOM the scaffolding process. These constants
+// match the threat model: a single template, copied once, into a target
+// the user just named. Anything beyond these bounds is rejected outright.
+const MAX_COPY_DEPTH = 32;
+const MAX_COPY_ENTRIES = 100_000;
+const MAX_COPY_FILE_BYTES = 100 * 1024 * 1024; // 100 MiB per file
+const MAX_COPY_TOTAL_BYTES = 500 * 1024 * 1024; // 500 MiB total
+
+function copyDirSync(src, dest, opts = {}) {
+  const depth = opts.depth || 0;
+  const srcRoot = opts.srcRoot || src;
+  const counter = opts.counter || { entries: 0, bytes: 0 };
+  if (depth > MAX_COPY_DEPTH) {
+    throw new Error(
+      `Refusing to copy: recursion depth ${depth} exceeds MAX_COPY_DEPTH=${MAX_COPY_DEPTH} (path="${src}")`
+    );
+  }
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     if (SKIP_NAMES.has(entry.name)) continue;
+    counter.entries += 1;
+    if (counter.entries > MAX_COPY_ENTRIES) {
+      throw new Error(
+        `Refusing to copy: entry count exceeds MAX_COPY_ENTRIES=${MAX_COPY_ENTRIES} (last entry="${path.join(src, entry.name)}")`
+      );
+    }
     const s = path.join(src, entry.name);
     const d = path.join(dest, entry.name);
     if (entry.isDirectory()) {
-      copyDirSync(s, d);
+      copyDirSync(s, d, { depth: depth + 1, srcRoot, counter });
     } else if (entry.isSymbolicLink()) {
-      // Preserve symlinks (degit does too). Resolve to absolute so the
-      // copy is self-contained.
+      // Containment (M1 — A05/A06 symlink escape): the symlink target MUST
+      // resolve inside the source template root. We reject:
+      //   - absolute symlinks (path.isAbsolute(link) === true)
+      //   - parent-traversing symlinks (resolved path outside srcRoot)
+      // These two rules together prevent a malicious template entry from
+      // planting symlinks like `passwd -> /etc/passwd` or
+      // `secrets -> /root/.ssh` into the user's scaffolded target. Tools
+      // following the scaffolded tree (`npm install`, IDE, linters, `tar`,
+      // `grep -r`) would otherwise read or write those symlink targets.
       const link = fs.readlinkSync(s);
-      const abs = path.isAbsolute(link) ? link : path.resolve(path.dirname(s), link);
-      // Skip symlinks that point into SKIP_NAMES targets.
-      const base = path.basename(abs);
-      if (SKIP_NAMES.has(base)) continue;
+      if (path.isAbsolute(link)) {
+        process.stderr.write(
+          `Warning: skipping absolute symlink "${s}" -> "${link}" (escape attempt)\n`
+        );
+        continue;
+      }
+      // Resolve the lexical symlink target against the symlink's directory.
+      // We check containment on THIS path (not the realpath) so we don't
+      // lose the security signal when the target doesn't exist on disk
+      // (which would be silently ENOENT-skipped below on systems where
+      // /etc -> /private/etc isn't a thing, e.g. CI containers, or when
+      // the malicious target is intentionally missing).
+      const abs = path.resolve(path.dirname(s), link);
+      const relLex = path.relative(srcRoot, abs);
+      if (relLex === '' || relLex.startsWith('..') || path.isAbsolute(relLex)) {
+        process.stderr.write(
+          `Warning: skipping symlink "${s}" -> "${abs}" (resolves outside template root)\n`
+        );
+        continue;
+      }
+      // Realpath check: confirms the lexical target really does live
+      // inside srcRoot after symlink resolution (defends against a
+      // symlink in an intermediate component pointing outside).
+      let real;
+      try {
+        real = fs.realpathSync.native(abs);
+      } catch (e) {
+        // Broken symlink (target missing) — skip silently, mirroring degit.
+        if (e.code === 'ENOENT') continue;
+        throw e;
+      }
+      const relReal = path.relative(srcRoot, real);
+      if (relReal === '' || relReal.startsWith('..') || path.isAbsolute(relReal)) {
+        process.stderr.write(
+          `Warning: skipping symlink "${s}" -> "${abs}" (realpath resolves outside template root)\n`
+        );
+        continue;
+      }
       fs.symlinkSync(abs, d);
     } else {
+      const stat = fs.statSync(s);
+      if (stat.size > MAX_COPY_FILE_BYTES) {
+        throw new Error(
+          `Refusing to copy: file "${s}" is ${stat.size} bytes, exceeds MAX_COPY_FILE_BYTES=${MAX_COPY_FILE_BYTES}`
+        );
+      }
+      counter.bytes += stat.size;
+      if (counter.bytes > MAX_COPY_TOTAL_BYTES) {
+        throw new Error(
+          `Refusing to copy: cumulative size exceeds MAX_COPY_TOTAL_BYTES=${MAX_COPY_TOTAL_BYTES} (last file="${s}")`
+        );
+      }
       fs.copyFileSync(s, d);
     }
   }
@@ -155,4 +256,16 @@ function downloadTemplate(type, targetFolder, opts = {}) {
   return emitter.clone(path.resolve(targetFolder));
 }
 
-module.exports = { VALID_TYPES, validateType, buildSrc, downloadTemplate, loadLock };
+module.exports = {
+  VALID_TYPES,
+  validateType,
+  buildSrc,
+  downloadTemplate,
+  loadLock,
+  localTemplateDir,
+  copyDirSync,
+  MAX_COPY_DEPTH,
+  MAX_COPY_ENTRIES,
+  MAX_COPY_FILE_BYTES,
+  MAX_COPY_TOTAL_BYTES,
+};

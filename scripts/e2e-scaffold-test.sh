@@ -28,6 +28,21 @@ set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE_TYPE="${1:?Usage: bash scripts/e2e-scaffold-test.sh <saas|shop|portfolio>}"
+
+# m5 (A05): whitelist TEMPLATE_TYPE before composing TARGET. We only allow
+# the three values the lockfile knows about; everything else is rejected
+# at the shell layer so ${TARGET} never ends up interpolated into a
+# `node -e` string or a CLI argv from user-controlled input. Centralizing
+# this here (rather than in the JS layer) means the e2e script's command
+# construction can rely on TEMPLATE_TYPE being safe.
+case "${TEMPLATE_TYPE}" in
+  saas|shop|portfolio) ;;
+  *)
+    echo "ERROR: TEMPLATE_TYPE must be one of saas|shop|portfolio (got '${TEMPLATE_TYPE}')" >&2
+    exit 2
+    ;;
+esac
+
 TARGET="/tmp/cbw-test-${TEMPLATE_TYPE}"
 
 if ! command -v node >/dev/null 2>&1; then
@@ -65,8 +80,17 @@ echo ">> scaffold ${TEMPLATE_TYPE} -> ${TARGET}"
 # --skip-install keeps CI offline (no npm registry hit). The e2e test only
 # asserts that the scaffold + name-rewrite produced a usable target dir;
 # installing deps is out of scope here.
+#
+# M2 (A06): we used to pass `--force` which (silently) bypassed BOTH CWD
+# containment AND TOCTOU symlink guards. The CLI now exposes two narrower
+# flags: `--overwrite` (replace existing target dir) and `--allow-unsafe-path`
+# (out-of-CWD / symlink-escape bypass). Our target is /tmp/cbw-test-<type>
+# (out of CWD) and the dir does NOT pre-exist (cleanup() just ran), so we
+# only need `--allow-unsafe-path`. `--overwrite` would be needed if the
+# trap fired without cleanup, but on a fresh run the target doesn't exist
+# yet and --allow-unsafe-path alone is sufficient.
 # shellcheck disable=SC2086 # intentional: empty ${TARGET} would be a bug.
-node "${REPO_ROOT}/dist/cli.js" "${TARGET}" --type="${TEMPLATE_TYPE}" --yes --force --skip-install
+node "${REPO_ROOT}/dist/cli.js" "${TARGET}" --type="${TEMPLATE_TYPE}" --yes --allow-unsafe-path --skip-install
 
 # --- assertions -------------------------------------------------------------
 
@@ -80,6 +104,10 @@ if [[ ! -f "${TARGET}/package.json" ]]; then
   exit 1
 fi
 
+# m3 (A05): TEMPLATE_TYPE is whitelisted above so the node -e string is
+# constructed from a known-safe value. We read package.json via the JS
+# runtime (Node's require) rather than `jq`/`grep` so we exercise the
+# actual JSON parser and not a string-substitution attack surface.
 PKG_NAME="$(node -e "console.log(require('${TARGET}/package.json').name)")"
 EXPECTED_NAME="cbw-test-${TEMPLATE_TYPE}"
 if [[ "${PKG_NAME}" != "${EXPECTED_NAME}" ]]; then
