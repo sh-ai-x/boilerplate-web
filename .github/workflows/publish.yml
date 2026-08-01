@@ -21,12 +21,11 @@ on:
   push:
     tags: ['v*.*.*']
 
-# Per-tag concurrency: serial publish per release; cancel superseded runs
-# for the same tag (e.g. a follow-up commit moved the tag) so the latest
-# build wins.
+# Per-tag concurrency serializes publishes without interrupting an in-flight
+# registry upload. A later run waits rather than racing a partial publish.
 concurrency:
   group: publish-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -38,15 +37,26 @@ jobs:
       id-token: write
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # Step 1 owns the build:cli script. Keep release attempts explicitly
+      # deferred until that prerequisite lands instead of failing later.
+      - name: Verify build prerequisite
+        run: |
+          if ! test -n "$(node -e "console.log(require('./package.json').scripts['build:cli'] || '')")"; then
+            echo "build:cli not yet defined — deferring until step 1 lands"
+            exit 1
+          fi
 
       - name: Setup Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@1a4442cacd436585916f0f1b6297b1c4fe4d93d3
         with:
           node-version: "20"
 
       - name: Install pnpm
-        run: npm install -g pnpm@9
+        uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5b2b
+        with:
+          version: 9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -54,11 +64,12 @@ jobs:
       - name: Build CLI bundle
         run: npm run build:cli
 
+      - name: Run test suite
+        run: pnpm test
+
       - name: Publish to npm (OIDC trusted publishing)
         env:
-          # Required so `npm publish` can correlate the tag with the
-          # version we want to ship. On tag pushes github.ref_name is
-          # the tag (e.g. v0.2.0); on workflow_dispatch it falls back
-          # to the package.json version.
-          NPM_CONFIG_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          # Tag pushes use the Git ref name as the npm dist-tag; manual runs
+          # publish under the standard `latest` dist-tag.
+          NPM_CONFIG_TAG: ${{ github.event_name == 'push' && github.ref_name || 'latest' }}
         run: npm publish --provenance --access public

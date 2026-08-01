@@ -9,7 +9,7 @@
     "AC3.1c grep -E 'id-token:[[:space:]]*write' .github/workflows/publish.yml -> exit=0 (OIDC id-token: write permission declared)",
     "AC3.1d tags:['v*.*.*'] pattern check -> exit=0 (inline YAML flow-style tags: ['v*.*.*'] matches AC regex)",
     "AC3.2  grep -E 'NPM_TOKEN|node-auth-token' -> exit=1 (no matches; OIDC only, no NPM_TOKEN env)",
-    "YAML parsed successfully via yaml.safe_load; jobs.publish.steps=6; permissions={contents:read, id-token:write}; triggers=[workflow_dispatch, push]"
+    "YAML parsed successfully via yaml.safe_load; jobs.publish.steps=8; permissions={contents:read, id-token:write}; triggers=[workflow_dispatch, push]"
   ],
   "stderr": "",
   "duration_seconds": 12.0,
