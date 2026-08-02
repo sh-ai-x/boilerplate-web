@@ -1,0 +1,15 @@
+{
+  "step": 1,
+  "name": "cli-bundle-build",
+  "exit_code": 0,
+  "stdout": "dist/cli.js 384630 bytes\ndist/cli.js 384630 bytes\n-rwxr-xr-x@\ndist/cli.js 384630 bytes\n---EXITS---\nAC2=0 AC2_PERMS=0 AC2_SIZE=0 AC2_1=0\nDURATION=0.525",
+  "stderr": "",
+  "duration_seconds": 0.525,
+  "timestamp": "2026-07-30T15:09:07Z",
+  "verification": {
+    "AC2": "PASS",
+    "AC2_perms": "PASS",
+    "AC2_size": "PASS",
+    "AC2_1": "PASS"
+  }
+}
