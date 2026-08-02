@@ -26,7 +26,17 @@ async function main() {
     }
   }
 
-  const { targetFolder, type, overwrite, allowScripts, yes, force } = parseArgs(process.argv);
+  const {
+    targetFolder,
+    type,
+    overwrite,
+    allowScripts,
+    yes,
+    force,
+    allowUnsafePath,
+    skipInstall,
+    deprecation,
+  } = parseArgs(process.argv);
 
   if (!targetFolder) {
     process.stderr.write(`Error: missing <targetFolder>\n${USAGE}\n`);
@@ -43,7 +53,13 @@ async function main() {
     process.exit(1);
   }
 
-  const safeTarget = assertSafeTarget(targetFolder, { allowUnsafe: force });
+  // Emit deprecation warning for the legacy `--force` alias (M2 — A06).
+  // `force` is now a derived flag (parsed into overwrite + allowUnsafePath
+  // by parseArgs); we surface the deprecation here so the user sees it
+  // exactly once per invocation, before any prompts.
+  if (deprecation) process.stderr.write(deprecation);
+
+  const safeTarget = assertSafeTarget(targetFolder, { allowUnsafePath });
 
   // Track whether the target existed BEFORE we did anything. The cleanup()
   // policy depends on this.
@@ -60,14 +76,20 @@ async function main() {
   // TOCTOU guard: re-realpath the target immediately before degit.clone.
   // Rejects any symlink insertion that happened between assertSafeTarget
   // and the actual write.
-  revalidateBeforeWrite(safeTarget, { allowUnsafe: force });
+  revalidateBeforeWrite(safeTarget, { allowUnsafePath });
 
   // Pipeline: each step runs in order; failure of any triggers cleanup()
   // and re-throws. Adding a step = appending to the array.
-  const cleanupOpts = { unsafeAllowed: force, targetPreExisted };
+  // --force (or --allow-unsafe-path) is what tells cleanup() it's allowed
+  // to rmSync a non-empty non-pre-existing target. --overwrite alone does
+  // NOT (M2 — A06 — opt-in to destructive cleanup must be separate from
+  // overwrite intent).
+  const cleanupOpts = { unsafeAllowed: force || allowUnsafePath, targetPreExisted };
 
   await runPipeline(safeTarget, cleanupOpts, [
-    // --overwrite enables degit force:true. --force only bypasses CWD safety.
+    // --overwrite enables degit force:true. --allow-unsafe-path only
+    // bypasses CWD safety (and is required when the target is out-of-CWD
+    // — e.g. the CI e2e scaffold test uses /tmp/cbw-test-<type>).
     async () => {
       await downloadTemplate(type, safeTarget, { force: overwrite });
     },
@@ -75,13 +97,28 @@ async function main() {
       const newName = rewritePackageName(safeTarget);
       process.stdout.write(`Renamed package.json "name" to "${newName}"\n`);
     },
-    async () => {
-      installDeps(safeTarget, { allowScripts });
-    },
-    async () => {
-      const checklist = formatPostInstallChecklist(type);
-      if (checklist) process.stdout.write(checklist);
-    },
+    ...(skipInstall
+      ? [
+          // m7 (A06): when --skip-install is set, the full checklist still
+          // applies once the user installs deps manually — print a one-
+          // liner pointing at it instead of dropping it on the floor.
+          async () => {
+            process.stdout.write(
+              '\n(--skip-install: post-install checklist deferred. ' +
+                'Run with --skip-install removed, or see docs/POST_INSTALL.md for the full ' +
+                `${type} checklist.)\n`
+            );
+          },
+        ]
+      : [
+          async () => {
+            installDeps(safeTarget, { allowScripts });
+          },
+          async () => {
+            const checklist = formatPostInstallChecklist(type);
+            if (checklist) process.stdout.write(checklist);
+          },
+        ]),
   ]);
 }
 

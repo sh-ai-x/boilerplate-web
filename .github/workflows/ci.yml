@@ -23,7 +23,7 @@ jobs:
       # step broke sh-ai-x/claude-statusline at PR #9 (see issue #202):
       # the upstream template had no checkout, so the consumer's local
       # fix adding one was silently reverted on the next --force.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Direct push to main — policy violation recorded
         run: bash scripts/branch-policy.sh
 
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -45,10 +45,52 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Run validation suite
         run: python3 scripts/validate.py
+
+  # E2E scaffold matrix (step 3 of phases/1-cli-distribution). Runs the
+  # bundled CLI against a fresh /tmp target for every supported type.
+  # Cross-platform: ubuntu-latest only. The script invokes npm install
+  # internally only for degit's transitive deps (none in practice — we
+  # use the in-repo templates fast path, see cli/lib/target-download.js),
+  # so this job does NOT touch the public npm registry. The e2e script
+  # uses --skip-install to keep it fully offline.
+  scaffold:
+    name: scaffold (${{ matrix.type }})
+    runs-on: ubuntu-latest
+    # m1 (A02): least-privilege GITHUB_TOKEN. The scaffold job only needs
+    # to read the repo (checkout) — nothing else.
+    permissions:
+      contents: read
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        type: ['saas', 'shop', 'portfolio']
+    steps:
+      # M3 (A03): SHA-pin third-party actions. Mutable tags can be re-pointed
+      # by the upstream maintainer (or an attacker who compromises the tag
+      # ref). Pin to the immutable commit SHAs that match the existing
+      # pinned SHAs elsewhere in this codebase so a single bump propagates.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "20"
+      - name: Install dev dependencies (esbuild, degit)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      # m2 (A03): surface vulnerable transitive devDeps without failing the
+      # job. The build:cli pipeline depends on esbuild + degit which both
+      # have had transitive-vuln advisories in the past; we want visibility
+      # but not a brittle CI gate.
+      - name: npm audit (non-fatal, devDeps only)
+        if: always()
+        continue-on-error: true
+        run: npm audit --omit=dev || true
+      - name: Run e2e scaffold test (${{ matrix.type }})
+        run: npm run test:scaffold -- ${{ matrix.type }}
