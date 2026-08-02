@@ -8,10 +8,10 @@
   "value_score": 125.0,
   "evidence_count": 3,
   "totals": {
-    "completed": 1,
+    "completed": 0,
     "blocked": 0,
-    "pending": 5,
-    "completion_pct": 17
+    "pending": 6,
+    "completion_pct": 0
   },
   "steps": [
     {
@@ -31,22 +31,11 @@
     {
       "step": 2,
       "name": "ci-publish-workflow",
-      "title": ".github/workflows/publish.yml with OIDC trusted publishing",
-      "status": "completed",
+      "title": "Reverted by user decision 2026-08-02 - superseded by Vercel MCP deployment",
+      "status": "pending",
       "ambiguity_delta": 0.0,
       "completed_at": "2026-07-30T15:13:35Z",
-      "summary": ".github/workflows/publish.yml with OIDC trusted publishing (no NPM_TOKEN). Refreshed for v2: dist-tag derived from ref (latest/rc/beta/alpha); environment-gated approval (npm-publish); post-build CLI smoke check; workflow_dispatch restricted to main; step2.md narrates the design + AC contract.",
-      "delivered_via": {
-        "pr": {
-          "number": 51,
-          "state": "OPEN",
-          "merged_at": null,
-          "title": "feat(1-cli-distribution): step 2 — ci-publish-workflow (v2, fresh PR)",
-          "predecessor_pr": 46
-        },
-        "branch": "plan/boilerplate-cli-distribution-step2-v2",
-        "build_sha": "e01f98d"
-      }
+      "summary": ".github/workflows/publish.yml with OIDC trusted publishing (no NPM_TOKEN). Refreshed for v2: dist-tag derived from ref (latest/rc/beta/alpha); environment-gated approval (npm-publish); post-build CLI smoke check; workflow_dispatch restricted to main; step2.md narrates the design + AC contract."
     },
     {
       "step": 3,
@@ -69,5 +58,6 @@
       "status": "pending",
       "ambiguity_delta": 0.0
     }
-  ]
+  ],
+  "updated_at": "2026-07-30T00:00:00Z"
 }
