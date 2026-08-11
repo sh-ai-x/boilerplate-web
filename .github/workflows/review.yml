@@ -312,6 +312,19 @@ jobs:
           if [ -f "$AGENT_OUTPUT" ]; then
             file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || echo '')"
           fi
+          # Issue #625 fallback: when the agent's execution file is missing
+          # the conversation stream (anthropics/claude-code-action@v1 with
+          # provider=minimax drops assistant messages + result.result), the
+          # agent still posts its verdict via `gh pr comment`, which IS
+          # visible to humans. Read the most recent claude-prefixed PR
+          # comment and parse the first `Verdict:` line. This unblocks the
+          # severity gate on the persistent MiniMax-output-file-drop path
+          # without lowering the bar (the comment IS the agent's verdict,
+          # not a default-Approve tolerance).
+          comment_verdict=""
+          if [ -z "$file_verdict" ] || [ "$file_verdict" = "PARSE_FAILED" ]; then
+            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>/dev/null || echo '')"
+          fi
           if [ "$file_verdict" = "PARSE_FAILED" ]; then
             # Issue #612 fix: extract-verdict.py saw the file existed
             # with parseable content but no recognizable `Verdict:`
@@ -330,6 +343,11 @@ jobs:
           elif [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
             verdict_source="agent-output-file"
+            agent_ran="true"
+          elif [ -n "$comment_verdict" ]; then
+            echo "::notice::verdict recovered from PR comment (issue #625 fallback; agent execution file was unparseable)"
+            verdict="$comment_verdict"
+            verdict_source="agent-pr-comment-fallback"
             agent_ran="true"
           else
             # Genuine no-file path: extract-verdict.py returned empty
@@ -589,6 +607,16 @@ jobs:
           if [ -f "$AGENT_OUTPUT" ]; then
             file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || true)"
           fi
+          # Issue #625 fallback (symmetric with the review extract step):
+          # when anthropics/claude-code-action@v1 with provider=minimax
+          # drops the conversation stream from the execution file, the
+          # agent still posts its verdict via `gh pr comment`. Read the
+          # most recent claude-prefixed PR comment and parse the first
+          # `Verdict:` line.
+          comment_verdict=""
+          if [ -z "$file_verdict" ] || [ "$file_verdict" = "PARSE_FAILED" ]; then
+            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>/dev/null || echo '')"
+          fi
           if [ "$file_verdict" = "PARSE_FAILED" ]; then
             # Issue #612 fix (symmetric with the review job): the agent
             # ran (file exists, JSONL parseable) but did not emit a
@@ -603,6 +631,11 @@ jobs:
           elif [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
             verdict_source="agent-output-file"
+            agent_ran="true"
+          elif [ -n "$comment_verdict" ]; then
+            echo "::notice::security verdict recovered from PR comment (issue #625 fallback)"
+            verdict="$comment_verdict"
+            verdict_source="agent-pr-comment-fallback"
             agent_ran="true"
           else
             # Genuine no-file path: extract-verdict.py returned empty
