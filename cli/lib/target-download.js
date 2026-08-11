@@ -2,6 +2,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const VALID_TYPES = ['saas', 'shop', 'portfolio'];
 
@@ -36,6 +37,24 @@ function loadLock() {
       );
     }
   }
+  // Per-template SHA-256 manifest. Closes A08-1 / A08-3: the local fast
+  // path must verify on-disk bytes against this digest, and the degit
+  // remote path must verify cloned bytes against the same digest. Without
+  // this, a stray or malicious `templates/<type>/package.json` would
+  // silently override the SHA-pinned github:<repo>#<sha> source.
+  if (!data.checksums || typeof data.checksums !== 'object') {
+    throw new Error(
+      `templates.lock.json 'checksums' must be an object with per-type "sha256:<hex>" digests.`
+    );
+  }
+  for (const t of VALID_TYPES) {
+    if (typeof data.checksums[t] !== 'string' ||
+        !/^sha256:[0-9a-f]{64}$/.test(data.checksums[t])) {
+      throw new Error(
+        `templates.lock.json 'checksums.${t}' must be "sha256:<64 hex>" (got ${JSON.stringify(data.checksums[t])}).`
+      );
+    }
+  }
   return data;
 }
 
@@ -60,6 +79,201 @@ function buildSrc(type) {
   return `${lock.source}#${lock.ref}/${lock.templates[type]}`;
 }
 
+// Verify a package.json's SHA-256 against the lockfile manifest for `type`.
+// `pkgPath` is the path to a package.json file on disk (or in a cloned
+// scaffold). Throws on mismatch; the caller decides how to handle it
+// (localTemplateDir returns null; the degit path rejects the clone).
+function verifyTemplateChecksum(type, pkgPath) {
+  const lock = getLock();
+  if (!validateType(type)) {
+    throw new Error(`Invalid --type "${type}" (verifyTemplateChecksum)`);
+  }
+  const expected = lock.checksums[type];
+  const bytes = fs.readFileSync(pkgPath);
+  const actual = 'sha256:' + crypto.createHash('sha256').update(bytes).digest('hex');
+  if (actual !== expected) {
+    throw new Error(
+      `sha256 mismatch for ${type} template (expected ${expected}, got ${actual} at ${pkgPath}). ` +
+      `Refusing to use this template; verify the lockfile pin or restore the expected bytes.`
+    );
+  }
+  return actual;
+}
+
+// Resolve the in-repo template dir (if present) relative to this file.
+// `__dirname` is `cli/lib/` in the unbundled CLI, so the in-repo layout is
+// `cli/lib/../../templates/<type>` = `<repo>/templates/<type>`.
+//
+// Containment (A05): the lockfile comes from this CLI package and is
+// trusted, but defense-in-depth means we re-validate the type BEFORE we
+// join the path, and we assert the resolved realpath is still inside the
+// CLI package root (no symlink in templates/ pointing outside).
+//
+// Integrity (A08-1 / A08-3): even after the realpath containment check,
+// a stray or malicious `templates/<type>/package.json` on disk would
+// silently satisfy the local fast path. We re-verify the package.json
+// SHA-256 against the lockfile's per-template manifest before returning
+// the path. On mismatch we return null so downloadTemplate falls through
+// to the SHA-pinned degit remote path.
+function localTemplateDir(type) {
+  const lock = getLock();
+  // Re-validate type defensively. validateType is a pure allowlist check,
+  // and the caller (downloadTemplate) already gates on it — but we re-call
+  // here so this function is safe to invoke from any entry point (tests,
+  // future callers, REPL).
+  if (!validateType(type)) return null;
+  const candidate = path.join(__dirname, '..', '..', lock.templates[type]);
+  // Resolve any symlink in the path chain. If a malicious template path
+  // escapes the package root via a symlink, the resolved realpath will
+  // land outside `path.join(__dirname, '..', '..')` and we refuse.
+  const pkgRoot = path.resolve(__dirname, '..', '..');
+  let real;
+  try {
+    real = fs.realpathSync.native(candidate);
+  } catch (_) {
+    return null;
+  }
+  const rel = path.relative(pkgRoot, real);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    return null;
+  }
+  // We require package.json to exist so we don't accidentally copy an empty
+  // placeholder dir as a "template".
+  const pkgPath = path.join(candidate, 'package.json');
+  if (!fs.existsSync(pkgPath)) return null;
+  // Verify the on-disk package.json against the lockfile SHA-256 manifest.
+  // Any failure (ENOENT, EACCES, hash mismatch) means we cannot trust this
+  // template; refuse the fast path and let degit handle the request.
+  try {
+    verifyTemplateChecksum(type, pkgPath);
+  } catch (_) {
+    return null;
+  }
+  return candidate;
+}
+
+// Path segments we never want to copy into a scaffolded target. These are
+// build artifacts (node_modules), VCS metadata (.git), or dev-only state.
+// Mirror degit's defaults: degit reads .gitignore + skips node_modules.
+// We keep a conservative, explicit list so behavior is deterministic even
+// when a template lacks a .gitignore.
+const SKIP_NAMES = new Set(['node_modules', '.git', '.DS_Store']);
+
+// Resource bounds for copyDirSync (A06 — anti-DoS). A malicious or
+// compromised template could include deeply-nested dirs, very large files,
+// or millions of entries to OOM the scaffolding process. These constants
+// match the threat model: a single template, copied once, into a target
+// the user just named. Anything beyond these bounds is rejected outright.
+const MAX_COPY_DEPTH = 32;
+const MAX_COPY_ENTRIES = 100_000;
+const MAX_COPY_FILE_BYTES = 100 * 1024 * 1024; // 100 MiB per file
+const MAX_COPY_TOTAL_BYTES = 500 * 1024 * 1024; // 500 MiB total
+
+function copyDirSync(src, dest, opts = {}) {
+  const depth = opts.depth || 0;
+  // Resolve srcRoot to its realpath on first call so subsequent containment
+  // checks are evaluated in realpath space. macOS exposes /var/folders/... as
+  // a symlink to /private/var/folders/...; comparing srcRoot (lexical) against
+  // a realpath'd symlink target with `path.relative` would otherwise misread
+  // a legitimate in-template relative link as escaping the template root.
+  const srcRoot = opts.srcRoot || src;
+  const srcRootReal = opts.srcRootReal || fs.realpathSync.native(srcRoot);
+  const counter = opts.counter || { entries: 0, bytes: 0 };
+  if (depth > MAX_COPY_DEPTH) {
+    throw new Error(
+      `Refusing to copy: recursion depth ${depth} exceeds MAX_COPY_DEPTH=${MAX_COPY_DEPTH} (path="${src}")`
+    );
+  }
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (SKIP_NAMES.has(entry.name)) continue;
+    counter.entries += 1;
+    if (counter.entries > MAX_COPY_ENTRIES) {
+      throw new Error(
+        `Refusing to copy: entry count exceeds MAX_COPY_ENTRIES=${MAX_COPY_ENTRIES} (last entry="${path.join(src, entry.name)}")`
+      );
+    }
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(s, d, { depth: depth + 1, srcRoot, srcRootReal, counter });
+    } else if (entry.isSymbolicLink()) {
+      // Containment (M1 — A05/A06 symlink escape): the symlink target MUST
+      // resolve inside the source template root. We reject:
+      //   - absolute symlinks (path.isAbsolute(link) === true)
+      //   - parent-traversing symlinks (resolved path outside srcRoot)
+      // These two rules together prevent a malicious template entry from
+      // planting symlinks like `passwd -> /etc/passwd` or
+      // `secrets -> /root/.ssh` into the user's scaffolded target. Tools
+      // following the scaffolded tree (`npm install`, IDE, linters, `tar`,
+      // `grep -r`) would otherwise read or write those symlink targets.
+      const link = fs.readlinkSync(s);
+      if (path.isAbsolute(link)) {
+        process.stderr.write(
+          `Warning: skipping absolute symlink "${s}" -> "${link}" (escape attempt)\n`
+        );
+        continue;
+      }
+      // Resolve the lexical symlink target against the symlink's directory.
+      // We check containment on THIS path (not the realpath) so we don't
+      // lose the security signal when the target doesn't exist on disk
+      // (which would be silently ENOENT-skipped below on systems where
+      // /etc -> /private/etc isn't a thing, e.g. CI containers, or when
+      // the malicious target is intentionally missing).
+      const abs = path.resolve(path.dirname(s), link);
+      const relLex = path.relative(srcRoot, abs);
+      if (relLex === '' || relLex.startsWith('..') || path.isAbsolute(relLex)) {
+        process.stderr.write(
+          `Warning: skipping symlink "${s}" -> "${abs}" (resolves outside template root)\n`
+        );
+        continue;
+      }
+      // Realpath check: confirms the lexical target really does live
+      // inside srcRoot after symlink resolution (defends against a
+      // symlink in an intermediate component pointing outside).
+      // Compare in realpath space (srcRootReal vs real) so the macOS
+      // /var/folders/... -> /private/var/folders/... indirection does not
+      // misread a legitimate in-template relative link as escaping.
+      let real;
+      try {
+        real = fs.realpathSync.native(abs);
+      } catch (e) {
+        // Broken symlink (target missing) — skip silently, mirroring degit.
+        if (e.code === 'ENOENT') continue;
+        throw e;
+      }
+      const relReal = path.relative(srcRootReal, real);
+      if (relReal === '' || relReal.startsWith('..') || path.isAbsolute(relReal)) {
+        process.stderr.write(
+          `Warning: skipping symlink "${s}" -> "${abs}" (realpath resolves outside template root)\n`
+        );
+        continue;
+      }
+      // LLM review r2 / M-2: write the textual link (relative or absolute
+      // as authored in the source template) rather than the resolved
+      // absolute path. Absolute symlinks pointing back into the CLI
+      // install dir dangle after the scaffold moves and leak local paths;
+      // relative symlinks resolve inside the scaffolded project wherever
+      // it ends up.
+      fs.symlinkSync(link, d);
+    } else {
+      const stat = fs.statSync(s);
+      if (stat.size > MAX_COPY_FILE_BYTES) {
+        throw new Error(
+          `Refusing to copy: file "${s}" is ${stat.size} bytes, exceeds MAX_COPY_FILE_BYTES=${MAX_COPY_FILE_BYTES}`
+        );
+      }
+      counter.bytes += stat.size;
+      if (counter.bytes > MAX_COPY_TOTAL_BYTES) {
+        throw new Error(
+          `Refusing to copy: cumulative size exceeds MAX_COPY_TOTAL_BYTES=${MAX_COPY_TOTAL_BYTES} (last file="${s}")`
+        );
+      }
+      fs.copyFileSync(s, d);
+    }
+  }
+}
+
 function downloadTemplate(type, targetFolder, opts = {}) {
   if (!validateType(type)) {
     const err = new Error(
@@ -67,6 +281,49 @@ function downloadTemplate(type, targetFolder, opts = {}) {
     );
     err.code = 'INVALID_TYPE';
     return Promise.reject(err);
+  }
+
+  // Local-template fast path. When `templates/<type>/package.json` exists
+  // relative to this file (true when the CLI runs from a checked-out repo
+  // — e.g. CI matrix, local dev), copy it directly instead of going through
+  // degit. This:
+  //   - avoids a real network round-trip in CI
+  //   - makes the e2e scaffold test deterministic and offline
+  //   - keeps the published-package behavior intact: when `templates/`
+  //     is NOT shipped (see `files` in package.json), localTemplateDir
+  //     returns null and we fall through to degit.
+  const local = opts.localTemplate === false ? null : localTemplateDir(type);
+  if (local) {
+    const target = path.resolve(targetFolder);
+    // LLM review r2 / M-1: parity with degit's force:false. degit refused
+    // to clobber an existing non-empty target unless `force: overwrite`
+    // was passed; copyDirSync used to silently overwrite. Restore parity:
+    // refuse to write into a non-empty target unless opts.force is true
+    // (opts.force is wired to --overwrite at the cli/index.js boundary).
+    const force = opts.force === true;
+    if (!force) {
+      try {
+        const existing = fs.readdirSync(target);
+        if (existing.length > 0) {
+          const err = new Error(
+            `Refusing to overwrite non-empty target "${target}" (${existing.length} entries); pass --overwrite to clobber.`
+          );
+          err.code = 'LOCAL_NONEMPTY_TARGET';
+          return Promise.reject(err);
+        }
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+        // ENOENT = target does not exist; copyDirSync will create it.
+      }
+    }
+    try {
+      copyDirSync(local, target);
+    } catch (e) {
+      const err = new Error(`Local template copy failed: ${e && e.message ? e.message : String(e)}`);
+      err.code = 'LOCAL_COPY_FAILED';
+      return Promise.reject(err);
+    }
+    return Promise.resolve();
   }
 
   // degitImpl is an optional dependency-injection seam (tests pass a fake;
@@ -88,7 +345,42 @@ function downloadTemplate(type, targetFolder, opts = {}) {
   const { degitImpl: _drop, ...cloneOpts } = opts;
   const force = cloneOpts.force === true;
   const emitter = degit(buildSrc(type), { cache: false, force, verbose: false });
-  return emitter.clone(path.resolve(targetFolder));
+  const resolvedTarget = path.resolve(targetFolder);
+  return emitter.clone(resolvedTarget).then(
+    () => {
+      // A08-1 / A08-3: even the SHA-pinned github: source can drift if the
+      // ref is re-pointed upstream between lockfile bumps. Re-verify the
+      // cloned package.json against the lockfile SHA-256 manifest.
+      // LLM review r2 / M-4: fail CLOSED. A missing package.json in the
+      // clone is itself a finding (malicious or broken upstream source)
+      // and must NOT be silently accepted.
+      const clonedPkg = path.join(resolvedTarget, 'package.json');
+      if (!fs.existsSync(clonedPkg)) {
+        throw new Error(
+          `Refusing to use cloned ${type} template: missing package.json at ${clonedPkg}. ` +
+          `The cloned source does not match the lockfile manifest.`
+        );
+      }
+      verifyTemplateChecksum(type, clonedPkg);
+    },
+    (e) => {
+      const err = new Error(`degit clone failed: ${e && e.message ? e.message : String(e)}`);
+      err.code = 'DEGIT_FAILED';
+      throw err;
+    },
+  );
 }
 
-module.exports = { VALID_TYPES, validateType, buildSrc, downloadTemplate, loadLock };
+module.exports = {
+  VALID_TYPES,
+  validateType,
+  buildSrc,
+  downloadTemplate,
+  loadLock,
+  localTemplateDir,
+  copyDirSync,
+  MAX_COPY_DEPTH,
+  MAX_COPY_ENTRIES,
+  MAX_COPY_FILE_BYTES,
+  MAX_COPY_TOTAL_BYTES,
+};
