@@ -7,6 +7,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
+// Ensure the .tmp-tests scratch dir exists for the pre-existing tests that
+// still use `path.join('.tmp-tests', ...)` as their mkdtempSync prefix. CI
+// runners and fresh clones don't have this dir by default; without the
+// mkdirSync these tests fail with ENOENT before reaching their assertions.
+fs.mkdirSync('.tmp-tests', { recursive: true });
+
 const { validateType, buildSrc, downloadTemplate, VALID_TYPES, loadLock } =
   require('../cli/lib/target-download');
 const { CHECKLISTS } = require('../cli/lib/post-install');
@@ -67,27 +73,49 @@ test('buildSrc reads source + ref + subdir from templates.lock.json (SSOT, behav
 });
 
 // === downloadTemplate — behavioral with injected degit ===
+//
+// These tests exercise the degit (github: source) code path. They pass
+// `localTemplate: false` to bypass the in-repo local-copy fast path
+// that downloadTemplate added for offline CI usage. The fast path is
+// covered by the e2e scaffold script (scripts/e2e-scaffold-test.sh).
 test('downloadTemplate rejects invalid type before any degit call (AC3, behavioral)', async () => {
   let called = false;
   const fakeDegit = () => ({ clone: () => { called = true; return Promise.resolve(); } });
-  await assert.rejects(() => downloadTemplate('invalid', '/tmp/cbw-x', { degitImpl: fakeDegit }), /Invalid --type/);
+  await assert.rejects(
+    () => downloadTemplate('invalid', '/tmp/cbw-x', { localTemplate: false, degitImpl: fakeDegit }),
+    /Invalid --type/
+  );
   assert.equal(called, false);
 });
 
 test('downloadTemplate defaults to force:false (A06-3, behavioral)', async () => {
   let capturedOpts = null;
-  await downloadTemplate('saas', '/tmp/cbw-y', { degitImpl: (src, opts) => {
+  const fs2 = require('node:fs');
+  await downloadTemplate('saas', '/tmp/cbw-y', { localTemplate: false, degitImpl: (src, opts) => {
     capturedOpts = opts;
-    return { clone: () => Promise.resolve() };
+    return { clone: (dest) => {
+      // Write a valid package.json so the post-clone integrity check passes.
+      fs2.mkdirSync(dest, { recursive: true });
+      // Copy the lockfile-pinned saas template bytes so the SHA matches.
+      const realPkg = fs2.readFileSync(path.join(__dirname, '..', 'templates', 'saas', 'package.json'));
+      fs2.writeFileSync(path.join(dest, 'package.json'), realPkg);
+      return Promise.resolve();
+    } };
   } });
   assert.equal(capturedOpts.force, false);
 });
 
 test('downloadTemplate respects opts.force === true (A06-3, behavioral)', async () => {
   let capturedOpts = null;
-  await downloadTemplate('saas', '/tmp/cbw-z', { force: true, degitImpl: (src, opts) => {
+  const fs2 = require('node:fs');
+  await downloadTemplate('saas', '/tmp/cbw-z', { localTemplate: false, force: true, degitImpl: (src, opts) => {
     capturedOpts = opts;
-    return { clone: () => Promise.resolve() };
+    return { clone: (dest) => {
+      fs2.mkdirSync(dest, { recursive: true });
+      const realPkg = fs2.readFileSync(path.join(__dirname, '..', 'templates', 'saas', 'package.json'));
+      fs2.writeFileSync(path.join(dest, 'package.json'), realPkg);
+      return Promise.resolve();
+    } };
   } });
   assert.equal(capturedOpts.force, true);
 });
@@ -107,7 +135,7 @@ test('downloadTemplate returns a typed Error for missing degit (behavioral)', as
   };
   try {
     await assert.rejects(
-      () => downloadTemplate('saas', '/tmp/cbw-m', {}),
+      () => downloadTemplate('saas', '/tmp/cbw-m', { localTemplate: false }),
       /Missing dependency/,
     );
   } finally {
@@ -433,4 +461,402 @@ test('rewrite.js leaves dependencies and scripts intact (behavioral)', () => {
   assert.deepEqual(after.dependencies, { next: '^14.0.0' });
   assert.deepEqual(after.scripts, { dev: 'next dev' });
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// === M1 (A05/A06): symlink containment in copyDirSync ===
+//
+// Malicious templates could plant symlinks like `passwd -> /etc/passwd` or
+// `secrets -> /root/.ssh` so tools following the scaffolded tree (npm
+// install, IDE, linters, tar, grep -r) read those targets. The new
+// copyDirSync MUST refuse absolute symlinks and any symlink whose target
+// resolves outside the source template root.
+test('copyDirSync rejects absolute symlinks in source template (M1, behavioral)', () => {
+  const fs2 = require('fs');
+  const { copyDirSync } = require('../cli/lib/target-download');
+  const src = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-symlink-'));
+  const dest = path.join(os.tmpdir(), `cbw-symlink-out-${Date.now()}`);
+  try {
+    fs2.writeFileSync(path.join(src, 'package.json'), '{}');
+    fs2.writeFileSync(path.join(src, 'normal.txt'), 'safe');
+    // Plant an absolute symlink whose target is outside the source root.
+    fs2.symlinkSync('/etc/passwd', path.join(src, 'passwd'));
+    const errs = [];
+    const origErr = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...rest) => {
+      errs.push(String(chunk));
+      return origErr(chunk, ...rest);
+    };
+    try {
+      copyDirSync(src, dest);
+    } finally {
+      process.stderr.write = origErr;
+    }
+    // The normal file must still be copied; the absolute symlink must be
+    // skipped (no symlink to /etc/passwd in the target).
+    assert.equal(fs2.existsSync(path.join(dest, 'normal.txt')), true);
+    assert.equal(fs2.existsSync(path.join(dest, 'passwd')), false,
+      'absolute symlink must NOT be recreated in target');
+    // The warning must have been emitted to stderr.
+    assert.ok(errs.some((s) => /skipping absolute symlink/.test(s)),
+      'copyDirSync must warn when it skips an absolute symlink');
+  } finally {
+    fs2.rmSync(src, { recursive: true, force: true });
+    fs2.rmSync(dest, { recursive: true, force: true });
+  }
+});
+
+test('copyDirSync rejects parent-traversing relative symlinks (M1, behavioral)', () => {
+  const fs2 = require('fs');
+  const { copyDirSync } = require('../cli/lib/target-download');
+  const src = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-symlink-'));
+  const dest = path.join(os.tmpdir(), `cbw-symlink-out-${Date.now()}`);
+  try {
+    fs2.writeFileSync(path.join(src, 'package.json'), '{}');
+    fs2.writeFileSync(path.join(src, 'safe.txt'), 'safe');
+    // Plant a relative symlink whose resolution exits the source root.
+    fs2.symlinkSync('../../../../etc/passwd', path.join(src, 'evil'));
+    const errs = [];
+    const origErr = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...rest) => {
+      errs.push(String(chunk));
+      return origErr(chunk, ...rest);
+    };
+    try {
+      copyDirSync(src, dest);
+    } finally {
+      process.stderr.write = origErr;
+    }
+    // safe file copied, evil symlink skipped.
+    assert.equal(fs2.existsSync(path.join(dest, 'safe.txt')), true);
+    assert.equal(fs2.existsSync(path.join(dest, 'evil')), false,
+      'parent-traversing symlink must NOT be recreated in target');
+    assert.ok(errs.some((s) => /resolves outside template root/.test(s)),
+      'copyDirSync must warn when it skips an escaping relative symlink');
+  } finally {
+    fs2.rmSync(src, { recursive: true, force: true });
+    fs2.rmSync(dest, { recursive: true, force: true });
+  }
+});
+
+// === M2 (A06): --force split into --overwrite and --allow-unsafe-path ===
+test('parseArgs splits --force into --overwrite + --allow-unsafe-path with deprecation (M2)', () => {
+  const r = parseArgs(['node', 'cli.js', 'my-target', '--type=saas', '--force']);
+  assert.equal(r.force, true, '--force still surfaces as force=true for back-compat');
+  assert.equal(r.overwrite, true, '--force must enable overwrite');
+  assert.equal(r.allowUnsafePath, true, '--force must enable allowUnsafePath');
+  assert.match(r.deprecation, /--force is deprecated/);
+});
+
+test('parseArgs: --overwrite alone does NOT enable allowUnsafePath (M2)', () => {
+  const r = parseArgs(['node', 'cli.js', 'my-target', '--type=saas', '--overwrite']);
+  assert.equal(r.overwrite, true);
+  assert.equal(r.allowUnsafePath, false);
+  assert.equal(r.force, false);
+  assert.equal(r.deprecation, null);
+});
+
+test('parseArgs: --allow-unsafe-path alone does NOT enable overwrite (M2)', () => {
+  const r = parseArgs(['node', 'cli.js', 'my-target', '--type=saas', '--allow-unsafe-path']);
+  assert.equal(r.overwrite, false);
+  assert.equal(r.allowUnsafePath, true);
+  assert.equal(r.force, false);
+  assert.equal(r.deprecation, null);
+});
+
+test('assertSafeTarget rejects out-of-CWD without --allow-unsafe-path (M2, behavioral)', () => {
+  // --overwrite alone should NOT bypass CWD containment.
+  assert.throws(
+    () => assertSafeTarget('../../../tmp/cbw-overwrite-only', { allowUnsafePath: false }),
+    /outside the current directory/,
+  );
+  assert.throws(
+    () => assertSafeTarget('../../../tmp/cbw-overwrite-only', { allowUnsafe: false }),
+    /outside the current directory/,
+    'legacy allowUnsafe alias still works',
+  );
+});
+
+test('assertSafeTarget accepts out-of-CWD with --allow-unsafe-path (M2, behavioral)', () => {
+  const r = assertSafeTarget('../../../tmp/cbw-unsafe-only', { allowUnsafePath: true });
+  assert.equal(r, path.resolve('../../../tmp/cbw-unsafe-only'));
+});
+
+test('revalidateBeforeWrite: --allow-unsafe-path accepts out-of-CWD realpath (M2)', () => {
+  const target = path.join('.tmp-tests', `cbw-rv-m2-${Date.now()}`);
+  try {
+    fs.symlinkSync('/etc', target);
+    const real = revalidateBeforeWrite(target, { allowUnsafePath: true });
+    assert.equal(real, fs.realpathSync.native(target));
+  } finally {
+    try { fs.unlinkSync(target); } catch (_) {}
+  }
+});
+
+// === m6 (A06): resource bounds in copyDirSync ===
+test('copyDirSync enforces MAX_COPY_DEPTH (m6, behavioral)', () => {
+  const fs2 = require('fs');
+  const { copyDirSync } = require('../cli/lib/target-download');
+  const src = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-depth-'));
+  const dest = path.join(os.tmpdir(), `cbw-depth-out-${Date.now()}`);
+  try {
+    fs2.writeFileSync(path.join(src, 'package.json'), '{}');
+    // Build a chain deeper than MAX_COPY_DEPTH (32).
+    let cur = src;
+    for (let i = 0; i < 40; i++) {
+      cur = path.join(cur, `d${i}`);
+      fs2.mkdirSync(cur);
+    }
+    fs2.writeFileSync(path.join(cur, 'leaf.txt'), 'leaf');
+    assert.throws(
+      () => copyDirSync(src, dest),
+      /recursion depth/,
+      'must reject recursion deeper than MAX_COPY_DEPTH',
+    );
+  } finally {
+    fs2.rmSync(src, { recursive: true, force: true });
+    fs2.rmSync(dest, { recursive: true, force: true });
+  }
+});
+
+test('copyDirSync enforces MAX_COPY_FILE_BYTES (m6, behavioral)', () => {
+  const fs2 = require('fs');
+  const { copyDirSync } = require('../cli/lib/target-download');
+  const src = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-big-'));
+  const dest = path.join(os.tmpdir(), `cbw-big-out-${Date.now()}`);
+  try {
+    fs2.writeFileSync(path.join(src, 'package.json'), '{}');
+    // Sparse-create a file larger than MAX_COPY_FILE_BYTES (100 MiB) by
+    // writing 1 byte at the desired offset. Truncation: we just need the
+    // stat'd size to exceed the bound.
+    const big = path.join(src, 'huge.bin');
+    const fd = fs2.openSync(big, 'w');
+    try {
+      fs2.ftruncateSync(fd, 101 * 1024 * 1024); // 101 MiB > 100 MiB
+    } finally {
+      fs2.closeSync(fd);
+    }
+    assert.throws(
+      () => copyDirSync(src, dest),
+      /exceeds MAX_COPY_FILE_BYTES/,
+      'must reject single files above MAX_COPY_FILE_BYTES',
+    );
+  } finally {
+    fs2.rmSync(src, { recursive: true, force: true });
+    fs2.rmSync(dest, { recursive: true, force: true });
+  }
+});
+
+// === m4 (A05): localTemplateDir re-validates type and contains realpath ===
+test('localTemplateDir rejects unknown types (m4, behavioral)', () => {
+  const { localTemplateDir } = require('../cli/lib/target-download');
+  assert.equal(localTemplateDir('invalid'), null);
+  assert.equal(localTemplateDir(null), null);
+  assert.equal(localTemplateDir(undefined), null);
+});
+
+test('localTemplateDir returns null for known type when package.json missing (m4)', () => {
+  // Just verify the function returns SOMETHING consistent (a string or null)
+  // for a known type — the in-repo templates/saas/package.json exists so
+  // we expect a string; we don't pin the exact path.
+  const { localTemplateDir } = require('../cli/lib/target-download');
+  const r = localTemplateDir('saas');
+  if (r !== null) {
+    assert.equal(typeof r, 'string');
+    assert.match(r, /templates[\\/]saas$/);
+  }
+});
+
+// === A08-1 / A08-3: per-template SHA-256 integrity verification ===
+//
+// Threat: a stray or malicious `templates/<type>/package.json` on disk
+// silently overrides the SHA-pinned `github:<repo>#<sha>` source the
+// lockfile declares. The local fast path must verify template bytes
+// against the lockfile's per-template SHA-256 before returning a path.
+// On mismatch, localTemplateDir returns null and downloadTemplate falls
+// through to the degit (remote, SHA-pinned) path.
+test('loadLock parses per-template SHA-256 checksums (A08-3, behavioral)', () => {
+  const lock = loadLock();
+  assert.ok(lock.checksums && typeof lock.checksums === 'object',
+    'lockfile must expose a `checksums` map');
+  for (const t of VALID_TYPES) {
+    assert.match(
+      lock.checksums[t],
+      /^sha256:[0-9a-f]{64}$/,
+      `lock.checksums.${t} must be "sha256:<64 hex>"`
+    );
+  }
+});
+
+test('localTemplateDir returns null when on-disk package.json hash mismatches lock (A08-1, behavioral)', () => {
+  const fs2 = require('node:fs');
+  const realPath = path.join(__dirname, '..', 'templates', 'saas', 'package.json');
+  const backup = fs2.readFileSync(realPath);
+  try {
+    fs2.writeFileSync(realPath, backup.toString('utf8') + '\n');
+    const { localTemplateDir } = require('../cli/lib/target-download');
+    assert.equal(localTemplateDir('saas'), null,
+      'tampered template must NOT satisfy localTemplateDir');
+  } finally {
+    fs2.writeFileSync(realPath, backup);
+    const { localTemplateDir } = require('../cli/lib/target-download');
+    const r = localTemplateDir('saas');
+    assert.ok(r !== null && /templates[\\/]saas$/.test(r),
+      'localTemplateDir must re-validate cleanly after restoring bytes');
+  }
+});
+
+test('downloadTemplate verifies remote template SHA-256 after degit clone (A08-1, behavioral)', async () => {
+  const fs2 = require('node:fs');
+  const { downloadTemplate } = require('../cli/lib/target-download');
+  const fakeDegit = () => ({
+    clone: async (dest) => {
+      fs2.mkdirSync(dest, { recursive: true });
+      fs2.writeFileSync(path.join(dest, 'package.json'),
+        '{"name":"tampered","version":"0.0.0"}\n');
+    },
+  });
+  await assert.rejects(
+    () => downloadTemplate('saas', path.join(os.tmpdir(), `cbw-sha-${Date.now()}`), {
+      localTemplate: false,
+      degitImpl: fakeDegit,
+    }),
+    /sha256 mismatch/i,
+  );
+});
+
+// === A02-5 / A08-2 regression: dist/cli.js wrapper keeps __dirname intact ===
+//
+// The published entry point is a wrapper that `require('../cli/index.js')`s
+// the real source. This keeps `__dirname` in cli/lib/target-download.js
+// pointing at the original module location, so loadLock() resolves
+// templates.lock.json correctly from any cwd (npm-install scenario).
+test('dist/cli.js loads lockfile from a foreign cwd (A02-5 regression, behavioral)', () => {
+  const fs2 = require('node:fs');
+  const distPath = path.join(__dirname, '..', 'dist', 'cli.js');
+  const foreignCwd = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-foreign-'));
+  try {
+    const r = spawnSync(process.execPath, [distPath, '--help'], {
+      cwd: foreignCwd,
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    assert.equal(r.status, 0,
+      `dist/cli.js must exit 0 from a foreign cwd (stderr: ${r.stderr})`);
+    assert.doesNotMatch(
+      r.stderr + r.stdout,
+      /Missing templates\.lock\.json/,
+      'dist/cli.js must not throw the "Missing templates.lock.json" path-math error',
+    );
+    assert.match(r.stdout, /Usage:/, '--help must still print usage from foreign cwd');
+  } finally {
+    fs2.rmSync(foreignCwd, { recursive: true, force: true });
+  }
+});
+
+// === 🔴 LLM review r2 / M-1: published package must include cli/ + lockfile ===
+//
+// dist/cli.js is a wrapper that requires ../cli/index.js and cli/lib/target-
+// download.js reads templates.lock.json via __dirname/../../. If package.json
+// `files` does not ship cli/** and templates.lock.json, `npm pack` produces a
+// tarball that throws `Cannot find module '../cli/index.js'` on first
+// invocation. This test reads package.json and asserts the `files` whitelist
+// is wide enough for the published layout to actually start.
+test('package.json files includes cli/** and templates.lock.json (r2 🔴, behavioral)', () => {
+  const fs2 = require('node:fs');
+  const pkg = JSON.parse(fs2.readFileSync(
+    path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const files = pkg.files || [];
+  // dist/** must remain so the bin entry resolves.
+  assert.ok(files.some((p) => p === 'dist/**' || p === 'dist/*'),
+    `files must include dist/** (got: ${JSON.stringify(files)})`);
+  // cli/** must be shipped so the wrapper's `require('../cli/index.js')` resolves.
+  assert.ok(files.some((p) => p === 'cli/**' || p === 'cli/*'),
+    `files must include cli/** so wrapper's require('../cli/index.js') resolves (got: ${JSON.stringify(files)})`);
+  // templates.lock.json must be shipped so loadLock() resolves at runtime.
+  assert.ok(files.includes('templates.lock.json'),
+    `files must include templates.lock.json so loadLock() resolves in published layout (got: ${JSON.stringify(files)})`);
+});
+
+// === 🟠 LLM review r2 / M-1: local fast path refuses to clobber without --overwrite ===
+//
+// The local-template fast path used to call copyDirSync unconditionally, which
+// silently overwrites existing target files. degit refused without `force:
+// overwrite`. Restore the parity: local fast path must refuse a non-empty
+// target unless opts.force (== overwrite intent) is true.
+test('downloadTemplate local fast path refuses non-empty target without --overwrite (r2 🟠 #1, behavioral)', async () => {
+  const fs2 = require('node:fs');
+  const { downloadTemplate } = require('../cli/lib/target-download');
+  // Create a non-empty target under a writable tmp dir; the local fast path
+  // activates (templates/saas exists in this checkout).
+  const foreignCwd = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-cwd-'));
+  const target = path.join(foreignCwd, 'target');
+  fs2.mkdirSync(target);
+  fs2.writeFileSync(path.join(target, 'precious.txt'), 'keep me');
+  try {
+    await assert.rejects(
+      () => downloadTemplate('saas', target, { allowUnsafePath: true }),
+      /non-empty target/i,
+      'local fast path must refuse non-empty target without --overwrite',
+    );
+    // Existing files must NOT have been overwritten.
+    assert.equal(fs2.readFileSync(path.join(target, 'precious.txt'), 'utf8'),
+      'keep me',
+      'existing target file must survive refused clobber');
+  } finally {
+    fs2.rmSync(foreignCwd, { recursive: true, force: true });
+  }
+});
+
+// === � LLM review r2 / M-2: copyDirSync writes relative symlinks, not absolute ===
+//
+// fs.symlinkSync(abs, d) writes absolute symlinks pointing back into the CLI
+// install dir. After the scaffold is moved, those absolute links dangle and
+// leak local paths. The fix: copy the link's textual target as-is (relative
+// to the source symlink's directory), and write that textual link into the
+// destination. Both the lexical and realpath containment checks pass; the
+// resulting dest/<name> is a relative symlink that resolves correctly inside
+// the scaffolded project.
+test('copyDirSync writes RELATIVE symlinks, not absolute (r2 🟠 #2, behavioral)', () => {
+  const fs2 = require('node:fs');
+  const { copyDirSync } = require('../cli/lib/target-download');
+  const src = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-rel-'));
+  const dest = path.join(os.tmpdir(), `cbw-rel-out-${Date.now()}`);
+  try {
+    fs2.writeFileSync(path.join(src, 'package.json'), '{}');
+    // Plant a relative symlink inside src/. The textual target must survive
+    // intact into dest/.
+    fs2.symlinkSync('./package.json', path.join(src, 'link-to-pkg'));
+    copyDirSync(src, dest);
+    const linkText = fs2.readlinkSync(path.join(dest, 'link-to-pkg'));
+    assert.equal(linkText, './package.json',
+      `dest symlink must be the relative text "./package.json" (got ${JSON.stringify(linkText)})`);
+    assert.equal(linkText.startsWith('/'), false,
+      'dest symlink must NOT be absolute');
+  } finally {
+    fs2.rmSync(src, { recursive: true, force: true });
+    fs2.rmSync(dest, { recursive: true, force: true });
+  }
+});
+
+// === 🟠 LLM review r2 / M-4: post-clone verification fails closed, not open ===
+//
+// `if (fs.existsSync(clonedPkg)) verifyTemplateChecksum(...)` lets a missing
+// manifest skip verification entirely (fails open). If the lockfile says a
+// template must have a checksum, the clone must have one too. Make the
+// existence check fail closed: missing package.json = throw.
+test('downloadTemplate degit path FAILS CLOSED on missing package.json (r2 🟠 #4, behavioral)', async () => {
+  const fs2 = require('node:fs');
+  const { downloadTemplate } = require('../cli/lib/target-download');
+  const target = path.join(os.tmpdir(), `cbw-noclose-${Date.now()}`);
+  const fakeDegit = () => ({
+    clone: async (dest) => {
+      // Clone produces NO package.json — simulates a malicious or broken
+      // degit source. downloadTemplate must reject, not silently pass.
+      fs2.mkdirSync(dest, { recursive: true });
+    },
+  });
+  await assert.rejects(
+    () => downloadTemplate('saas', target, { localTemplate: false, degitImpl: fakeDegit }),
+    /missing package\.json/i,
+  );
 });

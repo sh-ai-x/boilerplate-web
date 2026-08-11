@@ -1,0 +1,13 @@
+{
+  "exit_code": 0,
+  "stdout": "AC1 exit=0\ncreate-boilerplate-web 0.1.0 dist/cli.js [ 'dist/**', 'README.md', 'LICENSE' ] public\nAC1_1 exit=0\nAC1_2 exit=0\nAC1_3 exit=0\nduration_seconds=0.601646",
+  "stderr": "",
+  "duration_seconds": 0.601646,
+  "timestamp": "2026-07-30T15:00:02Z",
+  "verification": {
+    "AC1": "PASS",
+    "AC1_1": "PASS",
+    "AC1_2": "PASS",
+    "AC1_3": "PASS"
+  }
+}
