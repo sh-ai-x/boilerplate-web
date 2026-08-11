@@ -7,6 +7,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
+// Ensure the .tmp-tests scratch dir exists for the pre-existing tests that
+// still use `path.join('.tmp-tests', ...)` as their mkdtempSync prefix. CI
+// runners and fresh clones don't have this dir by default; without the
+// mkdirSync these tests fail with ENOENT before reaching their assertions.
+fs.mkdirSync('.tmp-tests', { recursive: true });
+
 const { validateType, buildSrc, downloadTemplate, VALID_TYPES, loadLock } =
   require('../cli/lib/target-download');
 const { CHECKLISTS } = require('../cli/lib/post-install');
