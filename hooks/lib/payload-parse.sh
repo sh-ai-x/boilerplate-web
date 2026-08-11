@@ -83,6 +83,7 @@ extract_content() {
   ' 2>/dev/null || true)"
 }
 
+
 # deny HOOK_PREFIX REASON — emit PreToolUse deny JSON envelope to stderr and
 # exit 2. Single source of truth for the 6 hook sites that previously each
 # hand-built the envelope (3 different mechanisms: jq -nc --arg / heredoc /
@@ -91,28 +92,11 @@ extract_content() {
 # Emits to stderr per Claude Code hook contract (deny JSON via stderr +
 # exit 2). Fails closed if jq is missing — callers must source this file
 # AFTER require_jq.
-#
-# Runtime-jq-failure fallback: command -v jq at source-time only proves
-# jq existed ONCE. If jq disappears or fails at runtime (OOM, sandbox
-# denial, env override between source-time and call-time), the JSON envelope
-# is lost — exit 2 alone with no envelope may be classified by future
-# Claude Code versions as "unknown error, retry" which converts the deny
-# into a denial-of-service / bypass surface. The printf fallback below
-# preserves the envelope shape verbatim when jq fails, so the hook contract
-# remains satisfied even in the degraded path. Note: the printf fallback
-# does NOT JSON-escape $REASON — the contract prioritises envelope shape
-# over content safety in the degraded path.
 deny() {
-  local hook_prefix="$1"
-  local reason="$2"
-  local jq_out
-  if ! jq_out="$(jq -nc --arg hp "$hook_prefix" --arg r "$reason" \
+    local hook_prefix="$1"
+    local reason="$2"
+    jq -nc --arg hp "$hook_prefix" --arg r "$reason" \
         '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:($hp + ": " + $r)}}' \
-        >&2 2>&1)"; then
-    # jq runtime failure — emit a printf-built envelope so the contract
-    # shape is preserved even if the JSON content is not perfectly escaped.
-    # The hook caller still exits 2 below; this is the fail-loud path.
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s: jq unavailable at runtime — %s"}}\n' "$hook_prefix" "$reason" >&2
-  fi
-  exit 2
+        >&2
+    exit 2
 }
