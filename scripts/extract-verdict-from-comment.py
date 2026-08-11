@@ -30,9 +30,18 @@ VERDICT_RE = re.compile(r"^\s*Verdict:\s*(Approve|Changes Requested|Blocked)\s*$
 
 
 def is_claude_bot(author_login: str) -> bool:
+    """Return True iff the comment author is a claude-prefixed agent bot.
+
+    Anthropic's claude-code-action@v1 posts comments under the bare
+    `claude` login (not `claude[bot]`); GitHub's bot-account suffix is
+    optional on the GraphQL side. Accept both forms. Also accepts
+    `dev-kit-ci[bot]`, `dev-kit-review[bot]`, etc.
+    """
     if not author_login:
         return False
     login = author_login.lower()
+    if login == "claude":
+        return True
     if login.startswith("claude") and login.endswith("[bot]"):
         return True
     if login.startswith("dev-kit") and login.endswith("[bot]"):

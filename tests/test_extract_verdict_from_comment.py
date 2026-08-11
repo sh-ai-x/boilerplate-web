@@ -53,9 +53,12 @@ class TestIsClaudeBot:
             ("claude[bot]", True),
             ("claude-code-action[bot]", True),
             ("claude-sonnet-4.5[bot]", True),
+            ("claude", True),  # bare login (claude-code-action@v1 default)
+            ("Claude", True),  # case-insensitive
             ("dev-kit-ci[bot]", True),
             ("dev-kit-review[bot]", True),
             ("sh-ai-x", False),
+            ("github-actions", False),  # gate audit-comment author
             ("dependabot[bot]", False),  # not a claude-prefixed bot
             ("", False),
         ],
