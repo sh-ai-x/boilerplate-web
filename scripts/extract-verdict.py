@@ -3,39 +3,65 @@
 extract-verdict.py — extract the LLM review/security verdict from
 anthropics/claude-code-action@v1's output file.
 
-ROOT-CAUSE FIX (issue: gate flapped Approve when agent posted a real
-Blocked verdict on PR #26): the previous version treated the action's
-output as JSON-lines, but the action writes a pretty-printed JSON
-ARRAY (anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e
-base-action/src/execution-file.ts: `writeExecutionFile` does
-`JSON.stringify(messages, null, 2)`). The previous splitlines() loop
-json.loads'd each opening brace on its own, every decode failed, and
-the script silently returned "" for every run — masking real Blocked
-verdicts as default-approve-empty-file. PR #26's gate rubber-stamped
-"Approve" while the agent had posted `Verdict: Blocked` (14 findings,
-3 critical) on the PR.
+ROOT-CAUSE FIX (issue #244, boilerplate-web PR #17/#19): the previous
+post-script extracted the verdict by grepping PR comments for
+"Verdict: <value>". That works ONLY when the agent actually posts a
+comment with a "Verdict:" line. When the agent posts an inline comment
+(mcp__github_inline_comment) or no comment at all, the post-script
+falls back to a stale comment from a previous run, causing the
+severity gate to flip-flop between Approve / Changes Requested /
+Blocked on every push.
 
-Now: parse the file as a JSON array (with NDJSON fallback for
-backward compat with older action versions that wrote one-message-per-
-line). Walk each message, find the last assistant text containing a
-verdict, return the verdict.
+This script reads the agent's full output (saved by the action to
+$RUNNER_TEMP/claude-execution-output.json or
+/home/runner/work/_temp/claude-execution-output.json) and extracts the
+LAST assistant text that contains "Verdict: <value>". The action's
+output is a JSON-lines stream of messages (init, user, assistant,
+result, etc.). The assistant messages contain the model's text output;
+the verdict appears in the FINAL assistant message per the prompt
+contract.
+
+CONTRACT (issue #612, consumer PR silent-Approve bug):
+  - file missing / HTML / unreadable / suspiciously small → stdout=""
+    (caller treats as the genuine "no-file" path; tolerance is
+    appropriate because it usually means a transient filesystem /
+    network problem)
+  - file exists, parseable JSON, but no assistant message contains a
+    recognizable `Verdict:` line → stdout="PARSE_FAILED"
+    (the agent ran and produced JSON output, but did not emit the
+    verdict contract — caller hard-fails the gate so the user MUST
+    fix the prompt contract instead of silently letting Approve pass;
+    see review.yml gate's `PARSE_FAILED` branch for the remediation
+    message)
+  - file exists, parseable JSON, with `Verdict:` in an assistant
+    message → stdout=verdict (last one wins)
+
+The "PARSE_FAILED" sentinel is what enables the gate to distinguish
+"agent ran but didn't follow the verdict contract" from "agent's output
+file is genuinely missing" — the two failure modes deserve different
+treatment (hard-fail vs. tolerance).
 
 Robustness:
 - If the file is missing, exits 0 with no output (caller falls back).
-- If the file looks like HTML (404, network error), exits 0 with no
-  output. Detected by checking the first non-blank character.
-- If the file is JSON but has no Verdict, exits 0 with no output.
+- If the file is HTML (e.g. 404 from a redirect), exits 0 with no
+  output (caller falls back). Detected by checking the first non-blank
+  character.
+- If the file is parseable JSON but has no Verdict, exits 0 with the
+  PARSE_FAILED sentinel (caller hard-fails the gate — see CONTRACT
+  above; this is the fix for the consumer silent-Approve bug).
 - If the file is unreadable, exits 0 with no output (caller falls back).
-- Returns exit 0 (not 1) on "not found" so the bash || true at the
-  call site can be simplified.
+- Returns exit 0 (not 1) on "not found" or "parse failed" so the
+  bash || true at the call site can stay simple.
 
 Usage:
   python3 extract-verdict.py <path-to-claude-execution-output.json>
 
-Prints the verdict (Approve|Blocked|Changes Requested) to stdout if found.
-Exits 0 always (no verdict on stdout = caller falls back).
+Prints the verdict (Approve|Blocked|Changes Requested), the sentinel
+`PARSE_FAILED`, or nothing (empty stdout = caller falls back to no-file
+path). Exits 0 always.
 """
 from __future__ import annotations
+
 import json
 import re
 import sys
@@ -43,124 +69,78 @@ from pathlib import Path
 
 VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
 
-# A08 / DoS hardening: anthropics/claude-code-action@v1's execution-file
-# is produced by a CI step on GitHub Actions. In normal use it is well
-# under 1 MiB, but a malformed/attacker-influenceable payload could be
-# much larger or deeply nested. Bound the read so an OOM here does not
-# take down the runner and turn the gate into a silent Approve.
-_MAX_INPUT_BYTES = 2 * 1024 * 1024  # 2 MiB hard cap
-_MAX_NESTING_DEPTH = 64  # json.loads default would happily recurse to ~1000
-
-
-def _iter_messages(text: str):
-    """Yield each message object from an already-read text blob.
-
-    Pure: takes the file CONTENT, not the path, so the caller does the
-    size precheck and the read.  Yields messages and falls silent on
-    parse errors so the caller can decide whether to treat those as
-    "no verdict" (legacy) or fail-closed (post-A10 hard contract).
-
-    Supports two formats:
-      1. Pretty-printed JSON array (current claude-code-action):
-           [{"type":"assistant",...},{"type":"user",...}, ...]
-      2. NDJSON / JSON-lines (older or alternative writers):
-           {"type":"assistant",...}
-           {"type":"user",...}
-    """
-    stripped = text.lstrip()
-    if not stripped:
-        return
-    if stripped.startswith("["):
-        # Format 1: JSON array.
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            return
-        if isinstance(data, list):
-            for m in data:
-                yield m
-        return
-    if stripped.startswith("{"):
-        # Format 2: NDJSON (one JSON object per line).
-        for line in text.splitlines():
-            line = line.strip()
-            if not line or not line.startswith("{"):
-                continue
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError:
-                continue
-        return
-    # Unknown leading char (e.g. HTML error page) — fall silent.
-
-
-def _collect_text(content) -> list[str]:
-    """Pull all text fragments out of an assistant `content` field.
-
-    Handles three shapes:
-      - list of content blocks (claude-code SDK): each block may be
-        {"type":"text","text":"..."} or a bare string.
-      - bare string (some wrappers).
-      - anything else → no text.
-    """
-    if isinstance(content, list):
-        out: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                out.append(str(block.get("text", "")))
-            elif isinstance(block, str):
-                out.append(block)
-        return out
-    if isinstance(content, str):
-        return [content]
-    return []
+# Sentinel emitted when the agent's output file exists and is parseable
+# JSONL but no assistant message contains a `Verdict:` line. The
+# review.yml severity gate has a dedicated branch that hard-fails with
+# a remediation message when this sentinel shows up in the verdict
+# output (see the `PARSE_FAILED` arm of the combined verdict gate).
+PARSE_FAILED = "PARSE_FAILED"
 
 
 def extract(path: Path) -> str:
     if not path.exists():
         return ""
-    # A08 / F2 — precheck size via stat() so we DO NOT call read_text()
-    # on a pathologically large payload.  Cap is _MAX_INPUT_BYTES.
-    try:
-        size = path.stat().st_size
-    except OSError:
-        return ""
-    if size > _MAX_INPUT_BYTES:
-        # A10 / F2 — emit a stderr sentinel so the caller knows the cap
-        # fired even though no verdict is on stdout.
-        print(
-            f"Install-Broken (input exceeds {_MAX_INPUT_BYTES} bytes; "
-            f"refusing to parse to avoid OOM)",
-            file=sys.stderr,
-        )
-        return ""
-    # F3 — read once, pass the result to the pure parser helper instead
-    # of letting the helper open the file again.
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
-    # Bail early if the file looks like an HTML error page.
+    # Bail early if the file looks like an HTML error page (network
+    # failure, 404, etc.). JSON-lines from claude-code-action NEVER
+    # starts with '<'. The 1KB peek is enough to detect any HTML/XML
+    # payload.
     peek = text.lstrip()[:1024]
     if peek.startswith("<") or peek.lower().startswith("<?xml"):
         return ""
     # Also bail if the file is suspiciously small or empty.
     if len(text) < 10:
         return ""
-
     last_verdict = ""
-    for msg in _iter_messages(text):
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Bail on any non-{ line — JSON-lines is strict.
+        if not line.startswith("{"):
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
         if not isinstance(msg, dict):
             continue
         if msg.get("type") != "assistant":
             continue
+        # Content can be in `message.content` (list of content blocks,
+        # claude-code SDK) or directly in `content` (string, some
+        # wrappers).
         content = msg.get("message", {}).get("content")
         if content is None:
             content = msg.get("content")
-        for t in _collect_text(content):
+        texts: list[str] = []
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    texts.append(str(block.get("text", "")))
+                elif isinstance(block, str):
+                    texts.append(block)
+        elif isinstance(content, str):
+            texts.append(content)
+        for t in texts:
             m = VERDICT_RE.search(t)
             if m:
                 last_verdict = m.group(1)
+    # Issue #612 fix: file passed the basic shape checks (exists, not
+    # HTML, has content) but no assistant message contained a
+    # recognizable `Verdict:` line. Either the JSONL was garbled, the
+    # agent didn't emit a verdict, or the wrapper changed format — in
+    # all cases we cannot trust a missing-verdict default. Emit the
+    # PARSE_FAILED sentinel so the gate hard-fails with the dedicated
+    # remediation message instead of silently defaulting to Approve
+    # (the old consumer-facing bug). The no-file / HTML / unreadable
+    # cases above still return "" so the caller can keep its genuine
+    # no-file tolerance path.
+    if not last_verdict:
+        return PARSE_FAILED
     return last_verdict
 
 
@@ -169,18 +149,11 @@ def main() -> int:
         print(f"usage: {sys.argv[0]} <claude-execution-output.json>", file=sys.stderr)
         return 2
     path = Path(sys.argv[1])
-    if not path.exists():
-        # A10: missing file — explicit non-zero + sentinel so the gate
-        # does NOT fall open to the empty-verdict Approve default.
-        print(f"Install-Broken (file-not-found: {path})", file=sys.stderr)
-        return 1
     verdict = extract(path)
-    if not verdict:
-        # A10: parsed cleanly but agent produced no Verdict: line. Treat
-        # as install-broken so the gate fails closed.
-        print("Install-Broken (no-verdict-line-in-output)", file=sys.stderr)
-        return 1
-    print(verdict)
+    # ALWAYS print to stdout (empty if not found). Caller uses stdout
+    # to decide whether to use the file verdict or fall back.
+    if verdict:
+        print(verdict)
     return 0
 
 
