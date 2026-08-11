@@ -67,12 +67,14 @@ jobs:
         run: |
           set -euo pipefail
           PKG=$(npm pack --silent)
-          trap 'rm -rf "${PKG}" extracted' EXIT
-          mkdir extracted
-          tar -xzf "${PKG}" -C extracted
+          trap 'rm -rf "${PKG}" "${RUNNER_TEMP:-/tmp}/cbw-pack-test"' EXIT
+          WORK="${RUNNER_TEMP:-/tmp}/cbw-pack-test"
+          rm -rf "${WORK}"
+          mkdir -p "${WORK}/extracted"
+          tar -xzf "${PKG}" -C "${WORK}/extracted"
           # Run from a directory OUTSIDE the repo so __dirname resolves
           # to the extracted package, not the source tree.
-          ( cd /tmp && node "$(pwd)/extracted/package/dist/cli.js" --help )
+          ( cd /tmp && node "${WORK}/extracted/package/dist/cli.js" --help )
       - name: Run cli regression suite
         run: npm test
 
