@@ -323,14 +323,7 @@ jobs:
           # not a default-Approve tolerance).
           comment_verdict=""
           if [ -z "$file_verdict" ] || [ "$file_verdict" = "PARSE_FAILED" ]; then
-            # Diagnostic echo to stderr so the runner log shows whether the
-            # script ran, what GH_TOKEN it sees, and what it returned.
-            echo "::debug::extract-verdict-from-comment: invoking on PR=${PR_NUMBER}" >&2
-            set +e
-            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>&1)"
-            rc=$?
-            set -e
-            echo "::debug::extract-verdict-from-comment: rc=${rc} verdict_len=${#comment_verdict} verdict_value='${comment_verdict}'" >&2
+            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>/dev/null || echo '')"
           fi
           if [ "$file_verdict" = "PARSE_FAILED" ]; then
             # Issue #612 fix: extract-verdict.py saw the file existed
@@ -659,14 +652,7 @@ jobs:
           # `Verdict:` line.
           comment_verdict=""
           if [ -z "$file_verdict" ] || [ "$file_verdict" = "PARSE_FAILED" ]; then
-            # Diagnostic echo to stderr so the runner log shows whether the
-            # script ran, what GH_TOKEN it sees, and what it returned.
-            echo "::debug::extract-verdict-from-comment: invoking on PR=${PR_NUMBER}" >&2
-            set +e
-            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>&1)"
-            rc=$?
-            set -e
-            echo "::debug::extract-verdict-from-comment: rc=${rc} verdict_len=${#comment_verdict} verdict_value='${comment_verdict}'" >&2
+            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>/dev/null || echo '')"
           fi
           if [ "$file_verdict" = "PARSE_FAILED" ]; then
             # Issue #612 fix (symmetric with the review job): the agent
