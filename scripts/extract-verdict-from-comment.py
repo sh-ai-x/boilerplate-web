@@ -75,13 +75,30 @@ def first_verdict(body: str) -> str:
 
 def main_with_arg(pr_number: str) -> str:
     """Return the parsed verdict (or "" if none); used by tests and main()."""
-    comments = fetch_comments(pr_number)
+    import os, tempfile
+    dbg = os.environ.get("EXTRACT_VERDICT_DEBUG_LOG", "/tmp/extract-verdict-from-comment.log")
+    def _log(msg):
+        try:
+            with open(dbg, "a") as f:
+                f.write(f"{msg}\n")
+        except Exception:
+            pass
+    _log(f"=== invoke pr={pr_number} python={__import__('sys').version.split()[0]} gh_token_set={'GH_TOKEN' in os.environ} gh_user={'gh auth status 2>&1 >/dev/null; gh api /user -q .login 2>/dev/null' or 'unknown'} ===")
+    try:
+        comments = fetch_comments(pr_number)
+        _log(f"fetch_comments returned {len(comments)} comments")
+    except Exception as e:
+        _log(f"fetch_comments raised: {type(e).__name__}: {e}")
+        return ""
     for c in reversed(comments):
-        if not is_claude_bot(c.get("author", "")):
+        author = c.get("author", "")
+        if not is_claude_bot(author):
             continue
         v = first_verdict(c.get("body", ""))
         if v:
+            _log(f"matched claude-bot verdict={v}")
             return v
+    _log("no matching claude-bot verdict; returning empty")
     return ""
 
 
