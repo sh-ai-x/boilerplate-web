@@ -40,6 +40,42 @@ jobs:
       - name: Run tests
         run: bash scripts/test.sh
 
+  # LLM review r2 / M-6: wire `npm test` (cli regression suite) into CI
+  # so the ~290 lines of behavioral tests in tests/cli.test.js actually
+  # gate merges. Without this, fixes to cli/ can ship with no test ever
+  # having run in CI.
+  cli-test:
+    name: cli-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "20"
+      - name: Install dependencies (degit for unit tests; esbuild build dep)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build the published CLI wrapper (dist/cli.js)
+        run: npm run build:cli
+      # r2 🔴 / M-1: prove the published layout actually starts. `npm pack`
+      # produces the same tarball a user would install via npm install /
+      # npx. If package.json `files` does not include cli/** or templates
+      # .lock.json, `node <pack-root>/package/dist/cli.js --help` throws
+      # `Cannot find module '../cli/index.js'` here.
+      - name: Smoke-test the published layout (npm pack + extract + run)
+        run: |
+          set -euo pipefail
+          PKG=$(npm pack --silent)
+          trap 'rm -rf "${PKG}" extracted' EXIT
+          mkdir extracted
+          tar -xzf "${PKG}" -C extracted
+          # Run from a directory OUTSIDE the repo so __dirname resolves
+          # to the extracted package, not the source tree.
+          ( cd /tmp && node "$(pwd)/extracted/package/dist/cli.js" --help )
+      - name: Run cli regression suite
+        run: npm test
+
   validate:
     name: validate
     runs-on: ubuntu-latest

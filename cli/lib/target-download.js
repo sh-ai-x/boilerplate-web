@@ -171,7 +171,13 @@ const MAX_COPY_TOTAL_BYTES = 500 * 1024 * 1024; // 500 MiB total
 
 function copyDirSync(src, dest, opts = {}) {
   const depth = opts.depth || 0;
+  // Resolve srcRoot to its realpath on first call so subsequent containment
+  // checks are evaluated in realpath space. macOS exposes /var/folders/... as
+  // a symlink to /private/var/folders/...; comparing srcRoot (lexical) against
+  // a realpath'd symlink target with `path.relative` would otherwise misread
+  // a legitimate in-template relative link as escaping the template root.
   const srcRoot = opts.srcRoot || src;
+  const srcRootReal = opts.srcRootReal || fs.realpathSync.native(srcRoot);
   const counter = opts.counter || { entries: 0, bytes: 0 };
   if (depth > MAX_COPY_DEPTH) {
     throw new Error(
@@ -190,7 +196,7 @@ function copyDirSync(src, dest, opts = {}) {
     const s = path.join(src, entry.name);
     const d = path.join(dest, entry.name);
     if (entry.isDirectory()) {
-      copyDirSync(s, d, { depth: depth + 1, srcRoot, counter });
+      copyDirSync(s, d, { depth: depth + 1, srcRoot, srcRootReal, counter });
     } else if (entry.isSymbolicLink()) {
       // Containment (M1 — A05/A06 symlink escape): the symlink target MUST
       // resolve inside the source template root. We reject:
@@ -225,6 +231,9 @@ function copyDirSync(src, dest, opts = {}) {
       // Realpath check: confirms the lexical target really does live
       // inside srcRoot after symlink resolution (defends against a
       // symlink in an intermediate component pointing outside).
+      // Compare in realpath space (srcRootReal vs real) so the macOS
+      // /var/folders/... -> /private/var/folders/... indirection does not
+      // misread a legitimate in-template relative link as escaping.
       let real;
       try {
         real = fs.realpathSync.native(abs);
@@ -233,14 +242,20 @@ function copyDirSync(src, dest, opts = {}) {
         if (e.code === 'ENOENT') continue;
         throw e;
       }
-      const relReal = path.relative(srcRoot, real);
+      const relReal = path.relative(srcRootReal, real);
       if (relReal === '' || relReal.startsWith('..') || path.isAbsolute(relReal)) {
         process.stderr.write(
           `Warning: skipping symlink "${s}" -> "${abs}" (realpath resolves outside template root)\n`
         );
         continue;
       }
-      fs.symlinkSync(abs, d);
+      // LLM review r2 / M-2: write the textual link (relative or absolute
+      // as authored in the source template) rather than the resolved
+      // absolute path. Absolute symlinks pointing back into the CLI
+      // install dir dangle after the scaffold moves and leak local paths;
+      // relative symlinks resolve inside the scaffolded project wherever
+      // it ends up.
+      fs.symlinkSync(link, d);
     } else {
       const stat = fs.statSync(s);
       if (stat.size > MAX_COPY_FILE_BYTES) {
@@ -280,6 +295,27 @@ function downloadTemplate(type, targetFolder, opts = {}) {
   const local = opts.localTemplate === false ? null : localTemplateDir(type);
   if (local) {
     const target = path.resolve(targetFolder);
+    // LLM review r2 / M-1: parity with degit's force:false. degit refused
+    // to clobber an existing non-empty target unless `force: overwrite`
+    // was passed; copyDirSync used to silently overwrite. Restore parity:
+    // refuse to write into a non-empty target unless opts.force is true
+    // (opts.force is wired to --overwrite at the cli/index.js boundary).
+    const force = opts.force === true;
+    if (!force) {
+      try {
+        const existing = fs.readdirSync(target);
+        if (existing.length > 0) {
+          const err = new Error(
+            `Refusing to overwrite non-empty target "${target}" (${existing.length} entries); pass --overwrite to clobber.`
+          );
+          err.code = 'LOCAL_NONEMPTY_TARGET';
+          return Promise.reject(err);
+        }
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+        // ENOENT = target does not exist; copyDirSync will create it.
+      }
+    }
     try {
       copyDirSync(local, target);
     } catch (e) {
@@ -315,10 +351,17 @@ function downloadTemplate(type, targetFolder, opts = {}) {
       // A08-1 / A08-3: even the SHA-pinned github: source can drift if the
       // ref is re-pointed upstream between lockfile bumps. Re-verify the
       // cloned package.json against the lockfile SHA-256 manifest.
+      // LLM review r2 / M-4: fail CLOSED. A missing package.json in the
+      // clone is itself a finding (malicious or broken upstream source)
+      // and must NOT be silently accepted.
       const clonedPkg = path.join(resolvedTarget, 'package.json');
-      if (fs.existsSync(clonedPkg)) {
-        verifyTemplateChecksum(type, clonedPkg);
+      if (!fs.existsSync(clonedPkg)) {
+        throw new Error(
+          `Refusing to use cloned ${type} template: missing package.json at ${clonedPkg}. ` +
+          `The cloned source does not match the lockfile manifest.`
+        );
       }
+      verifyTemplateChecksum(type, clonedPkg);
     },
     (e) => {
       const err = new Error(`degit clone failed: ${e && e.message ? e.message : String(e)}`);

@@ -84,18 +84,32 @@ test('downloadTemplate rejects invalid type before any degit call (AC3, behavior
 
 test('downloadTemplate defaults to force:false (A06-3, behavioral)', async () => {
   let capturedOpts = null;
+  const fs2 = require('node:fs');
   await downloadTemplate('saas', '/tmp/cbw-y', { localTemplate: false, degitImpl: (src, opts) => {
     capturedOpts = opts;
-    return { clone: () => Promise.resolve() };
+    return { clone: (dest) => {
+      // Write a valid package.json so the post-clone integrity check passes.
+      fs2.mkdirSync(dest, { recursive: true });
+      // Copy the lockfile-pinned saas template bytes so the SHA matches.
+      const realPkg = fs2.readFileSync(path.join(__dirname, '..', 'templates', 'saas', 'package.json'));
+      fs2.writeFileSync(path.join(dest, 'package.json'), realPkg);
+      return Promise.resolve();
+    } };
   } });
   assert.equal(capturedOpts.force, false);
 });
 
 test('downloadTemplate respects opts.force === true (A06-3, behavioral)', async () => {
   let capturedOpts = null;
+  const fs2 = require('node:fs');
   await downloadTemplate('saas', '/tmp/cbw-z', { localTemplate: false, force: true, degitImpl: (src, opts) => {
     capturedOpts = opts;
-    return { clone: () => Promise.resolve() };
+    return { clone: (dest) => {
+      fs2.mkdirSync(dest, { recursive: true });
+      const realPkg = fs2.readFileSync(path.join(__dirname, '..', 'templates', 'saas', 'package.json'));
+      fs2.writeFileSync(path.join(dest, 'package.json'), realPkg);
+      return Promise.resolve();
+    } };
   } });
   assert.equal(capturedOpts.force, true);
 });
@@ -731,4 +745,112 @@ test('dist/cli.js loads lockfile from a foreign cwd (A02-5 regression, behaviora
   } finally {
     fs2.rmSync(foreignCwd, { recursive: true, force: true });
   }
+});
+
+// === 🔴 LLM review r2 / M-1: published package must include cli/ + lockfile ===
+//
+// dist/cli.js is a wrapper that requires ../cli/index.js and cli/lib/target-
+// download.js reads templates.lock.json via __dirname/../../. If package.json
+// `files` does not ship cli/** and templates.lock.json, `npm pack` produces a
+// tarball that throws `Cannot find module '../cli/index.js'` on first
+// invocation. This test reads package.json and asserts the `files` whitelist
+// is wide enough for the published layout to actually start.
+test('package.json files includes cli/** and templates.lock.json (r2 🔴, behavioral)', () => {
+  const fs2 = require('node:fs');
+  const pkg = JSON.parse(fs2.readFileSync(
+    path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const files = pkg.files || [];
+  // dist/** must remain so the bin entry resolves.
+  assert.ok(files.some((p) => p === 'dist/**' || p === 'dist/*'),
+    `files must include dist/** (got: ${JSON.stringify(files)})`);
+  // cli/** must be shipped so the wrapper's `require('../cli/index.js')` resolves.
+  assert.ok(files.some((p) => p === 'cli/**' || p === 'cli/*'),
+    `files must include cli/** so wrapper's require('../cli/index.js') resolves (got: ${JSON.stringify(files)})`);
+  // templates.lock.json must be shipped so loadLock() resolves at runtime.
+  assert.ok(files.includes('templates.lock.json'),
+    `files must include templates.lock.json so loadLock() resolves in published layout (got: ${JSON.stringify(files)})`);
+});
+
+// === 🟠 LLM review r2 / M-1: local fast path refuses to clobber without --overwrite ===
+//
+// The local-template fast path used to call copyDirSync unconditionally, which
+// silently overwrites existing target files. degit refused without `force:
+// overwrite`. Restore the parity: local fast path must refuse a non-empty
+// target unless opts.force (== overwrite intent) is true.
+test('downloadTemplate local fast path refuses non-empty target without --overwrite (r2 🟠 #1, behavioral)', async () => {
+  const fs2 = require('node:fs');
+  const { downloadTemplate } = require('../cli/lib/target-download');
+  // Create a non-empty target under a writable tmp dir; the local fast path
+  // activates (templates/saas exists in this checkout).
+  const foreignCwd = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-cwd-'));
+  const target = path.join(foreignCwd, 'target');
+  fs2.mkdirSync(target);
+  fs2.writeFileSync(path.join(target, 'precious.txt'), 'keep me');
+  try {
+    await assert.rejects(
+      () => downloadTemplate('saas', target, { allowUnsafePath: true }),
+      /non-empty target/i,
+      'local fast path must refuse non-empty target without --overwrite',
+    );
+    // Existing files must NOT have been overwritten.
+    assert.equal(fs2.readFileSync(path.join(target, 'precious.txt'), 'utf8'),
+      'keep me',
+      'existing target file must survive refused clobber');
+  } finally {
+    fs2.rmSync(foreignCwd, { recursive: true, force: true });
+  }
+});
+
+// === � LLM review r2 / M-2: copyDirSync writes relative symlinks, not absolute ===
+//
+// fs.symlinkSync(abs, d) writes absolute symlinks pointing back into the CLI
+// install dir. After the scaffold is moved, those absolute links dangle and
+// leak local paths. The fix: copy the link's textual target as-is (relative
+// to the source symlink's directory), and write that textual link into the
+// destination. Both the lexical and realpath containment checks pass; the
+// resulting dest/<name> is a relative symlink that resolves correctly inside
+// the scaffolded project.
+test('copyDirSync writes RELATIVE symlinks, not absolute (r2 🟠 #2, behavioral)', () => {
+  const fs2 = require('node:fs');
+  const { copyDirSync } = require('../cli/lib/target-download');
+  const src = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-rel-'));
+  const dest = path.join(os.tmpdir(), `cbw-rel-out-${Date.now()}`);
+  try {
+    fs2.writeFileSync(path.join(src, 'package.json'), '{}');
+    // Plant a relative symlink inside src/. The textual target must survive
+    // intact into dest/.
+    fs2.symlinkSync('./package.json', path.join(src, 'link-to-pkg'));
+    copyDirSync(src, dest);
+    const linkText = fs2.readlinkSync(path.join(dest, 'link-to-pkg'));
+    assert.equal(linkText, './package.json',
+      `dest symlink must be the relative text "./package.json" (got ${JSON.stringify(linkText)})`);
+    assert.equal(linkText.startsWith('/'), false,
+      'dest symlink must NOT be absolute');
+  } finally {
+    fs2.rmSync(src, { recursive: true, force: true });
+    fs2.rmSync(dest, { recursive: true, force: true });
+  }
+});
+
+// === 🟠 LLM review r2 / M-4: post-clone verification fails closed, not open ===
+//
+// `if (fs.existsSync(clonedPkg)) verifyTemplateChecksum(...)` lets a missing
+// manifest skip verification entirely (fails open). If the lockfile says a
+// template must have a checksum, the clone must have one too. Make the
+// existence check fail closed: missing package.json = throw.
+test('downloadTemplate degit path FAILS CLOSED on missing package.json (r2 🟠 #4, behavioral)', async () => {
+  const fs2 = require('node:fs');
+  const { downloadTemplate } = require('../cli/lib/target-download');
+  const target = path.join(os.tmpdir(), `cbw-noclose-${Date.now()}`);
+  const fakeDegit = () => ({
+    clone: async (dest) => {
+      // Clone produces NO package.json — simulates a malicious or broken
+      // degit source. downloadTemplate must reject, not silently pass.
+      fs2.mkdirSync(dest, { recursive: true });
+    },
+  });
+  await assert.rejects(
+    () => downloadTemplate('saas', target, { localTemplate: false, degitImpl: fakeDegit }),
+    /missing package\.json/i,
+  );
 });
