@@ -645,3 +645,90 @@ test('localTemplateDir returns null for known type when package.json missing (m4
     assert.match(r, /templates[\\/]saas$/);
   }
 });
+
+// === A08-1 / A08-3: per-template SHA-256 integrity verification ===
+//
+// Threat: a stray or malicious `templates/<type>/package.json` on disk
+// silently overrides the SHA-pinned `github:<repo>#<sha>` source the
+// lockfile declares. The local fast path must verify template bytes
+// against the lockfile's per-template SHA-256 before returning a path.
+// On mismatch, localTemplateDir returns null and downloadTemplate falls
+// through to the degit (remote, SHA-pinned) path.
+test('loadLock parses per-template SHA-256 checksums (A08-3, behavioral)', () => {
+  const lock = loadLock();
+  assert.ok(lock.checksums && typeof lock.checksums === 'object',
+    'lockfile must expose a `checksums` map');
+  for (const t of VALID_TYPES) {
+    assert.match(
+      lock.checksums[t],
+      /^sha256:[0-9a-f]{64}$/,
+      `lock.checksums.${t} must be "sha256:<64 hex>"`
+    );
+  }
+});
+
+test('localTemplateDir returns null when on-disk package.json hash mismatches lock (A08-1, behavioral)', () => {
+  const fs2 = require('node:fs');
+  const realPath = path.join(__dirname, '..', 'templates', 'saas', 'package.json');
+  const backup = fs2.readFileSync(realPath);
+  try {
+    fs2.writeFileSync(realPath, backup.toString('utf8') + '\n');
+    const { localTemplateDir } = require('../cli/lib/target-download');
+    assert.equal(localTemplateDir('saas'), null,
+      'tampered template must NOT satisfy localTemplateDir');
+  } finally {
+    fs2.writeFileSync(realPath, backup);
+    const { localTemplateDir } = require('../cli/lib/target-download');
+    const r = localTemplateDir('saas');
+    assert.ok(r !== null && /templates[\\/]saas$/.test(r),
+      'localTemplateDir must re-validate cleanly after restoring bytes');
+  }
+});
+
+test('downloadTemplate verifies remote template SHA-256 after degit clone (A08-1, behavioral)', async () => {
+  const fs2 = require('node:fs');
+  const { downloadTemplate } = require('../cli/lib/target-download');
+  const fakeDegit = () => ({
+    clone: async (dest) => {
+      fs2.mkdirSync(dest, { recursive: true });
+      fs2.writeFileSync(path.join(dest, 'package.json'),
+        '{"name":"tampered","version":"0.0.0"}\n');
+    },
+  });
+  await assert.rejects(
+    () => downloadTemplate('saas', path.join(os.tmpdir(), `cbw-sha-${Date.now()}`), {
+      localTemplate: false,
+      degitImpl: fakeDegit,
+    }),
+    /sha256 mismatch/i,
+  );
+});
+
+// === A02-5 / A08-2 regression: dist/cli.js wrapper keeps __dirname intact ===
+//
+// The published entry point is a wrapper that `require('../cli/index.js')`s
+// the real source. This keeps `__dirname` in cli/lib/target-download.js
+// pointing at the original module location, so loadLock() resolves
+// templates.lock.json correctly from any cwd (npm-install scenario).
+test('dist/cli.js loads lockfile from a foreign cwd (A02-5 regression, behavioral)', () => {
+  const fs2 = require('node:fs');
+  const distPath = path.join(__dirname, '..', 'dist', 'cli.js');
+  const foreignCwd = fs2.mkdtempSync(path.join(os.tmpdir(), 'cbw-foreign-'));
+  try {
+    const r = spawnSync(process.execPath, [distPath, '--help'], {
+      cwd: foreignCwd,
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    assert.equal(r.status, 0,
+      `dist/cli.js must exit 0 from a foreign cwd (stderr: ${r.stderr})`);
+    assert.doesNotMatch(
+      r.stderr + r.stdout,
+      /Missing templates\.lock\.json/,
+      'dist/cli.js must not throw the "Missing templates.lock.json" path-math error',
+    );
+    assert.match(r.stdout, /Usage:/, '--help must still print usage from foreign cwd');
+  } finally {
+    fs2.rmSync(foreignCwd, { recursive: true, force: true });
+  }
+});

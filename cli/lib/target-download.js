@@ -2,6 +2,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const VALID_TYPES = ['saas', 'shop', 'portfolio'];
 
@@ -36,6 +37,24 @@ function loadLock() {
       );
     }
   }
+  // Per-template SHA-256 manifest. Closes A08-1 / A08-3: the local fast
+  // path must verify on-disk bytes against this digest, and the degit
+  // remote path must verify cloned bytes against the same digest. Without
+  // this, a stray or malicious `templates/<type>/package.json` would
+  // silently override the SHA-pinned github:<repo>#<sha> source.
+  if (!data.checksums || typeof data.checksums !== 'object') {
+    throw new Error(
+      `templates.lock.json 'checksums' must be an object with per-type "sha256:<hex>" digests.`
+    );
+  }
+  for (const t of VALID_TYPES) {
+    if (typeof data.checksums[t] !== 'string' ||
+        !/^sha256:[0-9a-f]{64}$/.test(data.checksums[t])) {
+      throw new Error(
+        `templates.lock.json 'checksums.${t}' must be "sha256:<64 hex>" (got ${JSON.stringify(data.checksums[t])}).`
+      );
+    }
+  }
   return data;
 }
 
@@ -60,6 +79,27 @@ function buildSrc(type) {
   return `${lock.source}#${lock.ref}/${lock.templates[type]}`;
 }
 
+// Verify a package.json's SHA-256 against the lockfile manifest for `type`.
+// `pkgPath` is the path to a package.json file on disk (or in a cloned
+// scaffold). Throws on mismatch; the caller decides how to handle it
+// (localTemplateDir returns null; the degit path rejects the clone).
+function verifyTemplateChecksum(type, pkgPath) {
+  const lock = getLock();
+  if (!validateType(type)) {
+    throw new Error(`Invalid --type "${type}" (verifyTemplateChecksum)`);
+  }
+  const expected = lock.checksums[type];
+  const bytes = fs.readFileSync(pkgPath);
+  const actual = 'sha256:' + crypto.createHash('sha256').update(bytes).digest('hex');
+  if (actual !== expected) {
+    throw new Error(
+      `sha256 mismatch for ${type} template (expected ${expected}, got ${actual} at ${pkgPath}). ` +
+      `Refusing to use this template; verify the lockfile pin or restore the expected bytes.`
+    );
+  }
+  return actual;
+}
+
 // Resolve the in-repo template dir (if present) relative to this file.
 // `__dirname` is `cli/lib/` in the unbundled CLI, so the in-repo layout is
 // `cli/lib/../../templates/<type>` = `<repo>/templates/<type>`.
@@ -68,6 +108,13 @@ function buildSrc(type) {
 // trusted, but defense-in-depth means we re-validate the type BEFORE we
 // join the path, and we assert the resolved realpath is still inside the
 // CLI package root (no symlink in templates/ pointing outside).
+//
+// Integrity (A08-1 / A08-3): even after the realpath containment check,
+// a stray or malicious `templates/<type>/package.json` on disk would
+// silently satisfy the local fast path. We re-verify the package.json
+// SHA-256 against the lockfile's per-template manifest before returning
+// the path. On mismatch we return null so downloadTemplate falls through
+// to the SHA-pinned degit remote path.
 function localTemplateDir(type) {
   const lock = getLock();
   // Re-validate type defensively. validateType is a pure allowlist check,
@@ -92,8 +139,17 @@ function localTemplateDir(type) {
   }
   // We require package.json to exist so we don't accidentally copy an empty
   // placeholder dir as a "template".
-  if (fs.existsSync(path.join(candidate, 'package.json'))) return candidate;
-  return null;
+  const pkgPath = path.join(candidate, 'package.json');
+  if (!fs.existsSync(pkgPath)) return null;
+  // Verify the on-disk package.json against the lockfile SHA-256 manifest.
+  // Any failure (ENOENT, EACCES, hash mismatch) means we cannot trust this
+  // template; refuse the fast path and let degit handle the request.
+  try {
+    verifyTemplateChecksum(type, pkgPath);
+  } catch (_) {
+    return null;
+  }
+  return candidate;
 }
 
 // Path segments we never want to copy into a scaffolded target. These are
@@ -253,7 +309,23 @@ function downloadTemplate(type, targetFolder, opts = {}) {
   const { degitImpl: _drop, ...cloneOpts } = opts;
   const force = cloneOpts.force === true;
   const emitter = degit(buildSrc(type), { cache: false, force, verbose: false });
-  return emitter.clone(path.resolve(targetFolder));
+  const resolvedTarget = path.resolve(targetFolder);
+  return emitter.clone(resolvedTarget).then(
+    () => {
+      // A08-1 / A08-3: even the SHA-pinned github: source can drift if the
+      // ref is re-pointed upstream between lockfile bumps. Re-verify the
+      // cloned package.json against the lockfile SHA-256 manifest.
+      const clonedPkg = path.join(resolvedTarget, 'package.json');
+      if (fs.existsSync(clonedPkg)) {
+        verifyTemplateChecksum(type, clonedPkg);
+      }
+    },
+    (e) => {
+      const err = new Error(`degit clone failed: ${e && e.message ? e.message : String(e)}`);
+      err.code = 'DEGIT_FAILED';
+      throw err;
+    },
+  );
 }
 
 module.exports = {

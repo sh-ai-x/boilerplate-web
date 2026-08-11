@@ -84,13 +84,18 @@ jobs:
           node-version: "20"
       - name: Install dev dependencies (esbuild, degit)
         run: npm ci --ignore-scripts --no-audit --no-fund
-      # m2 (A03): surface vulnerable transitive devDeps without failing the
-      # job. The build:cli pipeline depends on esbuild + degit which both
-      # have had transitive-vuln advisories in the past; we want visibility
-      # but not a brittle CI gate.
-      - name: npm audit (non-fatal, devDeps only)
-        if: always()
+      # m2 (A03 / A09-1): surface vulnerable transitive devDeps without
+      # failing the job. The build:cli pipeline depends on esbuild + degit
+      # which both have had transitive-vuln advisories in the past; we
+      # want visibility but not a brittle CI gate. NOTE: this audit step
+      # MUST include devDeps (no `--omit=dev`) so it actually audits the
+      # deps the comment names; `--omit=dev` audits production deps only.
+      # `continue-on-error: true` lets a finding surface in the GH Actions
+      # UI without failing the matrix entry — removing the previous `|| true`
+      # ensures the step's exit code propagates to continue-on-error (so a
+      # real finding shows as a warning, not a silent pass).
+      - name: npm audit (non-fatal, includes devDeps)
         continue-on-error: true
-        run: npm audit --omit=dev || true
+        run: npm audit
       - name: Run e2e scaffold test (${{ matrix.type }})
         run: npm run test:scaffold -- ${{ matrix.type }}
