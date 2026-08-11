@@ -24,3 +24,4 @@ dist/
 # Installed dependencies — both pnpm-lock.yaml and package-lock.json are
 # tracked at root. CI uses pnpm; local dev uses pnpm or npm.
 node_modules/
+
