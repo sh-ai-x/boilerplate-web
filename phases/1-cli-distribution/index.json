@@ -3,14 +3,15 @@
   "phase": "1-cli-distribution",
   "project": "boilerplate-web",
   "created_at": "2026-07-30T00:00:00Z",
-  "worktree": "plan/boilerplate-cli-distribution",
+  "worktree": "plan/boilerplate-cli-distribution-step2-v2",
   "ambiguity_score": 2,
   "value_score": 125.0,
   "evidence_count": 3,
   "totals": {
     "completed": 1,
     "blocked": 0,
-    "pending": 5,
+    "pending": 4,
+    "reverted": 1,
     "completion_pct": 16
   },
   "steps": [
@@ -34,8 +35,10 @@
       "step": 2,
       "name": "ci-publish-workflow",
       "title": ".github/workflows/publish.yml with OIDC trusted publishing",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "reverted",
+      "ambiguity_delta": 0.0,
+      "reverted_at": "2026-08-02T09:03:34Z",
+      "summary": "Reverted 2026-08-02 — the ci-publish-workflow step (npm OIDC trusted publishing) was a misframing of the original intent (Vercel deployment, not npm CLI publishing). publish.yml, step2.md, and step2-output.json removed. Superseded by a future Vercel MCP deployment step."
     },
     {
       "step": 3,
@@ -58,5 +61,6 @@
       "status": "pending",
       "ambiguity_delta": 0.0
     }
-  ]
+  ],
+  "updated_at": "2026-08-02T10:44:55Z"
 }
