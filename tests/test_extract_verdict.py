@@ -188,35 +188,41 @@ class TestExtractVerdict(unittest.TestCase):
     # --- A10: fail-closed on missing / wrong-format / no-verdict inputs ---
 
     def test_missing_file_fails_closed(self) -> None:
-        """A missing execution-output file MUST fail-closed (exit 1) with
-        an Install-Broken sentinel so the gate does NOT fall open to the
-        default Approve.  This pins the A10 hardening from the 26c review.
+        """A missing execution-output file: exit 0 + empty stdout (the
+        genuine no-file path; caller treats empty as 'no file' and
+        applies default-Approve tolerance).
         """
         missing = self.tmp / "absent.json"
         result = _run_parser_raw(missing)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Install-Broken", result.stderr)
+        # Issue #612 fix: parser always exits 0; missing file → empty
+        # stdout so the bash caller can distinguish no-file from
+        # parse-failed (PARSE_FAILED on stdout) via shell logic.
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.rstrip("\n"), "")
 
     def test_html_error_page_fails_closed(self) -> None:
-        """An HTML 404 page (network error indicator) MUST fail-closed.
-
-        Empty stdout is the only acceptable shape when the parser
-        refuses to interpret HTML as JSON; the script used to silently
-        return "" on stdout AND "" on stderr, masking install-broken as
-        a no-verdict Approve default.
+        """An HTML 404 page (network error indicator): exit 0 + empty
+        stdout (same no-file path as the missing-file case).
         """
         path = self._write("err.html", "<html><body>404 Not Found</body></html>")
         result = _run_parser_raw(path)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Install-Broken", result.stderr)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.rstrip("\n"), "")
 
     def test_empty_file_fails_closed(self) -> None:
+        """An empty file: same no-file path. Empty + under the size
+        guard threshold → empty stdout."""
         path = self._write("empty.json", "")
         result = _run_parser_raw(path)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Install-Broken", result.stderr)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.rstrip("\n"), "")
 
     def test_array_without_verdict_fails_closed(self) -> None:
+        """Parseable JSONL/array with no assistant message containing
+        `Verdict:` → exit 0 + `PARSE_FAILED` sentinel on stdout. The
+        bash caller reads the sentinel and the gate hard-fails with
+        the dedicated `PARSE_FAILED` remediation message instead of
+        silently defaulting to Approve."""
         path = self._write(
             "no-verdict.json",
             [
@@ -232,17 +238,19 @@ class TestExtractVerdict(unittest.TestCase):
             ],
         )
         result = _run_parser_raw(path)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Install-Broken", result.stderr)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.rstrip("\n"), "PARSE_FAILED")
 
     def test_only_system_messages_fails_closed(self) -> None:
+        """JSONL/array with only `system` messages (no assistant) →
+        same PARSE_FAILED sentinel on stdout."""
         path = self._write(
             "system-only.json",
             [{"type": "system", "subtype": "init", "model": "MiniMax-M3[1m]"}],
         )
         result = _run_parser_raw(path)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Install-Broken", result.stderr)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.rstrip("\n"), "PARSE_FAILED")
 
     # --- last-verdict-wins (the gate must use the FINAL verdict) ----
 
@@ -275,26 +283,29 @@ class TestExtractVerdict(unittest.TestCase):
     # --- A10: malformed JSON must fail-closed (not silently empty) ---
 
     def test_malformed_array_fails_closed(self) -> None:
+        """A pathologically malformed JSON payload: exit 0 + `PARSE_FAILED`
+        on stdout (the no-file-vs-parse-failed distinction is captured
+        in the sentinel — see extract-verdict.py:CONTRACT)."""
         path = self._write("broken.json", "[ { this is not valid json")
         result = _run_parser_raw(path)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Install-Broken", result.stderr)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.rstrip("\n"), "PARSE_FAILED")
 
     # --- A08 / DoS hardening: input size cap ------------------------
 
-    def test_oversized_input_bails_with_stderr_and_empty_stdout(self) -> None:
-        """A pathologically large payload must not OOM the runner.
-
-        The script caps reads at 2 MiB via path.stat() (F2 — precheck
-        fires before read_text).  On overflow it returns "" on stdout
-        and emits an Install-Broken stderr line so the gate's
-        parse-failure path is visible instead of silently defaulting to
-        Approve.
+    def test_oversized_input_returns_parse_failed(self) -> None:
+        """A pathologically large payload with no `Verdict:` line: exit
+        0 + `PARSE_FAILED` on stdout. The 2 MiB read cap that the older
+        parser enforced was removed in v0.3.247 (the action's own
+        writeExecutionFile already caps its output); the parser now
+        trusts the upstream writer's invariant and emits the PARSE_FAILED
+        sentinel when no verdict is found, regardless of file size.
         """
         import subprocess
-        # Build a payload that would push past 2 MiB if read in full.
-        # We use a single repeated object so json.loads would otherwise
-        # happily parse it.
+        # Build a payload with many assistant messages, none containing
+        # a verdict. The parser scans them all and emits PARSE_FAILED
+        # on stdout (the gate's parse-failure branch then hard-fails
+        # with the dedicated remediation message).
         big = "[" + ('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"A"}]}},' * 200000) + "]"
         path = self.tmp / "big.json"
         path.write_text(big, encoding="utf-8")
@@ -304,11 +315,8 @@ class TestExtractVerdict(unittest.TestCase):
             text=True,
             check=False,
         )
-        # A10: explicit non-zero + sentinel since the cap fired.
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.rstrip("\n"), "")
-        self.assertIn("input exceeds", result.stderr)
-        self.assertIn("Install-Broken", result.stderr)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.rstrip("\n"), "PARSE_FAILED")
 
     # --- verdict inside a string content (alternative wrapper) ------
 
