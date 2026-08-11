@@ -3,7 +3,7 @@
 # every-task-new-worktree rule.
 #
 # Sourced (not executed) by hooks/worktree-guard.sh,
-# hooks/task-detector.sh, and hooks/session-start-check.sh.
+# hooks/session-start-check.sh.
 # Duplication has been a maintenance trap — keep this file as the
 # single source of truth for the discriminator.
 #
@@ -13,7 +13,7 @@
 #                                    leaves it empty on jq-less no-op.
 #   worktree_detect_jq_missing_warn — emit a stderr warning to stdout
 #                                    then echo 0 (advisory). Used by
-#                                    advisory hooks (task-detector,
+#                                    advisory hooks (session-start-check,
 #                                    session-start-check) which can't
 #                                    hard-block on missing jq.
 
@@ -63,8 +63,7 @@ worktree_detect() {
 
 # abspath — canonicalize a path to absolute. Uses realpath when
 # available (macOS ships it by default since 10.12), falls back to
-# identity / manual resolution. Exported so sourced consumers can
-# call it directly if needed.
+# identity / manual resolution.
 abspath() {
   local p="$1"
   if command -v realpath >/dev/null 2>&1; then
@@ -78,7 +77,7 @@ abspath() {
 }
 
 # worktree_detect_jq_missing_warn — emit a stderr warning when jq is
-# missing. Used by the advisory hooks (task-detector,
+# missing. Used by the advisory hooks (session-start-check,
 # session-start-check) which can't hard-block on missing jq. The
 # hard-block hook (worktree-guard) fails closed (exit 2) instead.
 worktree_detect_jq_missing_warn() {
