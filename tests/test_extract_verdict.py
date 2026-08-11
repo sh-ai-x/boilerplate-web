@@ -336,5 +336,91 @@ class TestExtractVerdict(unittest.TestCase):
         self.assertEqual(_run_parser(path), "Changes Requested")
 
 
+
+    # --- verdict inside the SDK's `result` type message (final answer)
+    #
+    # boilerplate-web PR #49 repro: claude-code-action@v1 with provider=minimax
+    # emits the agent's final answer as a top-level `type: "result"` message
+    # with a plain string `result` field (per @anthropic-ai/claude-agent-sdk
+    # SDKMessage contract). The agent writes "Verdict: <value>" there but
+    # never in an assistant text block, so the parser (which only inspects
+    # `type == "assistant"`) returns empty → PARSE_FAILED. Mirrors the actual
+    # file shape from the MiniMax action's writeExecutionFile output.
+    def test_result_type_message_with_verdict(self) -> None:
+        path = self._write(
+            "result-msg.json",
+            [
+                {
+                    "type": "system",
+                    "subtype": "init",
+                    "model": "MiniMax-M3[1m]",
+                },
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "tool_use", "name": "TodoWrite", "input": {}}
+                        ],
+                    },
+                },
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": (
+                        "Verdict: Approve\n\n## Review summary\n\n"
+                        "All checks passed."
+                    ),
+                },
+            ],
+        )
+        self.assertEqual(_run_parser(path), "Approve")
+
+    def test_result_type_message_with_changes_requested(self) -> None:
+        path = self._write(
+            "result-cr.json",
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "thinking about it..."}
+                        ],
+                    },
+                },
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "Verdict: Changes Requested\n\nFound 3 major issues.",
+                },
+            ],
+        )
+        self.assertEqual(_run_parser(path), "Changes Requested")
+
+    def test_result_type_message_with_blocked(self) -> None:
+        path = self._write(
+            "result-blocked.json",
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "analyzing..."}],
+                    },
+                },
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "Verdict: Blocked\n\nCritical: SQL injection in saas/billing.",
+                },
+            ],
+        )
+        self.assertEqual(_run_parser(path), "Blocked")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
