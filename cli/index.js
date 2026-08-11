@@ -80,11 +80,12 @@ async function main() {
 
   // Pipeline: each step runs in order; failure of any triggers cleanup()
   // and re-throws. Adding a step = appending to the array.
-  // --force (or --allow-unsafe-path) is what tells cleanup() it's allowed
-  // to rmSync a non-empty non-pre-existing target. --overwrite alone does
-  // NOT (M2 — A06 — opt-in to destructive cleanup must be separate from
-  // overwrite intent).
-  const cleanupOpts = { unsafeAllowed: force || allowUnsafePath, targetPreExisted };
+  // LLM review r2 / M-5: destructive cleanup (rmSync a non-empty target)
+  // must be opt-in via --force ONLY. --allow-unsafe-path is a path-
+  // containment bypass (out-of-CWD / symlink-escape) and is unrelated to
+  // destructive cleanup; merging them let `--allow-unsafe-path` users get
+  // rm -rf without explicitly requesting it.
+  const cleanupOpts = { unsafeAllowed: force, targetPreExisted };
 
   await runPipeline(safeTarget, cleanupOpts, [
     // --overwrite enables degit force:true. --allow-unsafe-path only

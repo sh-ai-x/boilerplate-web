@@ -43,7 +43,14 @@ case "${TEMPLATE_TYPE}" in
     ;;
 esac
 
-TARGET="/tmp/cbw-test-${TEMPLATE_TYPE}"
+# LLM review r2 / M-8: predictable /tmp/cbw-test-<type> target was a
+# symlink-pre-planting surface (CWE-377) — an attacker could pre-create
+# /tmp/cbw-test-saas as a symlink to /etc before this script ran, and
+# degit would happily write through it. Use mktemp -d for a fresh unique
+# path each run, and clean it up on EXIT so leftover scaffolds don't
+# accumulate. The mktemp suffix carries TEMPLATE_TYPE so the dir name is
+# still informative in CI logs.
+TARGET="$(mktemp -d -t "cbw-test-${TEMPLATE_TYPE}.XXXXXX")"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "ERROR: node not on PATH" >&2
@@ -52,24 +59,15 @@ fi
 
 # --- cleanup ----------------------------------------------------------------
 #
-# Cleanup policy: clean up on FAILURE only. On success we leave the
-# scaffolded target in place so AC4's external assertions
-# (`test -f /tmp/cbw-test-<type>/package.json` followed by reading the
-# package.json via `node -e ...`) can inspect it after the script exits.
-# On any failure (set -e abort, explicit exit 1), the ERR trap fires
-# cleanup() so partial scaffold state doesn't bleed into the next run.
-# This satisfies the spec's "trap EXIT cleanup" intent (deterministic
-# cleanup, not manual rm) while preserving the on-disk artifacts the AC
-# chain depends on.
+# LLM review r2 / M-8 + / M-11: cleanup must fire on EXIT (not just ERR)
+# so SIGINT/SIGTERM and explicit 'exit 1' paths also clean up. The trap
+# is deterministic and never leaves the temp dir behind, regardless of
+# whether the script exited 0 or non-zero.
 
 cleanup() {
-  # `rm -rf` so a partial scaffold (e.g. degit wrote half the files)
-  # still gets cleared. If the dir was never created, ignore the failure.
   rm -rf "${TARGET}" 2>/dev/null || true
 }
-# ERR fires on any failing command under `set -e`. We use ERR (not EXIT)
-# so the success path leaves the target intact for downstream AC checks.
-trap cleanup ERR
+trap cleanup EXIT
 
 # --- run --------------------------------------------------------------------
 
@@ -109,7 +107,10 @@ fi
 # runtime (Node's require) rather than `jq`/`grep` so we exercise the
 # actual JSON parser and not a string-substitution attack surface.
 PKG_NAME="$(node -e "console.log(require('${TARGET}/package.json').name)")"
-EXPECTED_NAME="cbw-test-${TEMPLATE_TYPE}"
+# LLM review r2 / M-8: TARGET is mktemp -d (random suffix). The scaffolded
+# package.json name is the basename of TARGET, so derive the expected name
+# from the actual TARGET path rather than the hardcoded prefix.
+EXPECTED_NAME="$(basename "${TARGET}")"
 if [[ "${PKG_NAME}" != "${EXPECTED_NAME}" ]]; then
   echo "FAIL: package.json name is '${PKG_NAME}', expected '${EXPECTED_NAME}'" >&2
   exit 1
