@@ -362,6 +362,43 @@ jobs:
           audit_body="<!-- dev-kit-verdict-audit --> run=${{ github.run_id }} job=review status=${{ job.status }} verdict=${verdict:-MISSING} source=${verdict_source:-unknown}"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
 
+      # ROOT-CAUSE FIX (boilerplate-web PR #49 repro): when the LLM agent
+      # ran but its output file lacked a parseable "Verdict:" line (model
+      # didn't follow the formatting instruction), the extract step
+      # defaulted to Approve but no comment was ever posted on the PR —
+      # the operator couldn't see the review verdict. The workflow's only
+      # comment-posting step (Post fallback verdict comment) only runs in
+      # the workflow-validation skip path, so the normal-path case left
+      # the PR with zero LLM comments.
+      #
+      # Now: after extracting the verdict, ALWAYS post a single comment
+      # with the verdict line + provenance metadata. Skip when the
+      # fallback path already posted (avoids duplicating that comment).
+      # The agent may have also posted its own detailed comment — having
+      # both is fine; the gate's regex parses "Verdict: <value>" from
+      # either.
+      - name: Post verdict comment (review)
+        if: always() && steps.fallback.outputs.needs_fallback != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          VERDICT: ${{ steps.extract_verdict.outputs.verdict }}
+          AGENT_RAN: ${{ steps.extract_verdict.outputs.agent_ran }}
+        run: |
+          verdict="${VERDICT:-Approve}"
+          agent_ran="${AGENT_RAN:-false}"
+          {
+            echo "Verdict: ${verdict}"
+            echo
+            if [ "${agent_ran}" = "true" ]; then
+              echo "Source: agent ran; verdict extracted from claude-execution-output.json (see workflow run for full transcript)."
+            else
+              echo "Source: agent did not run; verdict defaulted to Approve (workflow-validation guard or job cancellation)."
+            fi
+            echo
+            echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } | gh pr comment "$PR_NUMBER" --body-file -
+
   security:
     # See review-job comment above; same fork-safety contract.
     if: |
@@ -631,6 +668,35 @@ jobs:
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
           audit_body="<!-- dev-kit-verdict-audit --> run=${{ github.run_id }} job=security status=${{ job.status }} verdict=${verdict:-MISSING} source=${verdict_source:-unknown}"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
+
+      # ROOT-CAUSE FIX (boilerplate-web PR #49 repro): see /dev-kit:review
+      # sibling step above for full context. Same rationale: the
+      # workflow's only comment-posting path (Post fallback verdict
+      # comment) only ran in the workflow-validation skip case, leaving
+      # normal-path runs with no PR comment when the agent's output file
+      # lacked a parseable "Verdict:" line. Now post a verdict comment
+      # unconditionally (skipping the bootstrap-PR fallback path).
+      - name: Post verdict comment (security)
+        if: always() && steps.fallback.outputs.needs_fallback != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          VERDICT: ${{ steps.extract_verdict.outputs.verdict }}
+          AGENT_RAN: ${{ steps.extract_verdict.outputs.agent_ran }}
+        run: |
+          verdict="${VERDICT:-Approve}"
+          agent_ran="${AGENT_RAN:-false}"
+          {
+            echo "Verdict: ${verdict}"
+            echo
+            if [ "${agent_ran}" = "true" ]; then
+              echo "Source: agent ran; verdict extracted from claude-execution-output.json (see workflow run for full transcript)."
+            else
+              echo "Source: agent did not run; verdict defaulted to Approve (workflow-validation guard or job cancellation)."
+            fi
+            echo
+            echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } | gh pr comment "$PR_NUMBER" --body-file -
 
   gate:
     # Severity gate: same fork-safety guard. Pull from job outputs --
