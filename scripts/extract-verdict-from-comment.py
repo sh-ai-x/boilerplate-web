@@ -75,8 +75,8 @@ def first_verdict(body: str) -> str:
 
 def main_with_arg(pr_number: str) -> str:
     """Return the parsed verdict (or "" if none); used by tests and main()."""
-    import os, tempfile
-    dbg = os.environ.get("EXTRACT_VERDICT_DEBUG_LOG", "/tmp/extract-verdict-from-comment.log")
+    import os
+    dbg = os.environ.get("GITHUB_STEP_SUMMARY", "/tmp/extract-verdict-from-comment.log")
     def _log(msg):
         try:
             with open(dbg, "a") as f:
