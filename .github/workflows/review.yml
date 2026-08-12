@@ -323,20 +323,32 @@ jobs:
           # not a default-Approve tolerance).
           comment_verdict=""
           if [ -z "$file_verdict" ] || [ "$file_verdict" = "PARSE_FAILED" ]; then
-            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>/dev/null || echo '')"
+            # Diagnostic echo to stderr so the runner log shows whether the
+            # script ran, what GH_TOKEN it sees, and what it returned.
+            echo "::debug::extract-verdict-from-comment: invoking on PR=${PR_NUMBER}" >&2
+            set +e
+            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>&1)"
+            rc=$?
+            set -e
+            echo "::debug::extract-verdict-from-comment: rc=${rc} verdict_len=${#comment_verdict} verdict_value='${comment_verdict}'" >&2
           fi
-          if [ "$file_verdict" = "PARSE_FAILED" ]; then
-            # Issue #612 fix: extract-verdict.py saw the file existed
-            # with parseable content but no recognizable `Verdict:`
-            # line — the agent ran but did not follow the verdict
-            # contract. Thread the PARSE_FAILED sentinel through to
-            # the gate so it hard-fails with the dedicated remediation
-            # message (see the gate's PARSE_FAILED branch) instead of
-            # silently defaulting to Approve (the old consumer-facing
-            # bug). The audit comment's source field now records
-            # `parse-failed-no-verdict` so the reviewer can see the
-            # actual failure mode without re-reading the gate logs.
-            echo "::warning::review verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
+          # Issue #612 + #625: when file_verdict=PARSE_FAILED, try the
+          # PR-comment fallback BEFORE defaulting to PARSE_FAILED. The
+          # previous if/elif order took the PARSE_FAILED branch first
+          # and never used comment_verdict, defeating the issue #625
+          # fix (PR #49 review finding #1, "the comment-verdict
+          # fallback is computed but discarded").
+          if [ "$file_verdict" = "PARSE_FAILED" ] && [ -n "$comment_verdict" ]; then
+            echo "::notice::verdict recovered from PR comment despite file PARSE_FAILED (issue #625 fallback took priority over issue #612 sentinel)"
+            verdict="$comment_verdict"
+            verdict_source="agent-pr-comment-fallback"
+            agent_ran="true"
+          elif [ "$file_verdict" = "PARSE_FAILED" ]; then
+            # Issue #612 sentinel: the agent ran but produced no parseable
+            # `Verdict:` line and no comment fallback recovered either.
+            # Thread the sentinel to the gate for the dedicated remediation
+            # message.
+            echo "::warning::review verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line, no claude-prefixed comment with verdict); gate will hard-fail with parse-failed-no-verdict remediation"
             verdict="PARSE_FAILED"
             verdict_source="parse-failed-no-verdict"
             agent_ran="true"
@@ -345,7 +357,7 @@ jobs:
             verdict_source="agent-output-file"
             agent_ran="true"
           elif [ -n "$comment_verdict" ]; then
-            echo "::notice::verdict recovered from PR comment (issue #625 fallback; agent execution file was unparseable)"
+            echo "::notice::verdict recovered from PR comment (issue #625 fallback; agent execution file was empty)"
             verdict="$comment_verdict"
             verdict_source="agent-pr-comment-fallback"
             agent_ran="true"
@@ -652,16 +664,25 @@ jobs:
           # `Verdict:` line.
           comment_verdict=""
           if [ -z "$file_verdict" ] || [ "$file_verdict" = "PARSE_FAILED" ]; then
-            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>/dev/null || echo '')"
+            # Diagnostic echo to stderr so the runner log shows whether the
+            # script ran, what GH_TOKEN it sees, and what it returned.
+            echo "::debug::extract-verdict-from-comment: invoking on PR=${PR_NUMBER}" >&2
+            set +e
+            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>&1)"
+            rc=$?
+            set -e
+            echo "::debug::extract-verdict-from-comment: rc=${rc} verdict_len=${#comment_verdict} verdict_value='${comment_verdict}'" >&2
           fi
-          if [ "$file_verdict" = "PARSE_FAILED" ]; then
-            # Issue #612 fix (symmetric with the review job): the agent
-            # ran (file exists, JSONL parseable) but did not emit a
-            # recognizable `Verdict:` line. Thread the PARSE_FAILED
-            # sentinel through to the gate so it hard-fails with the
-            # dedicated remediation message instead of silently
-            # defaulting to Approve (the old consumer-facing bug).
-            echo "::warning::security verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
+          # Issue #612 + #625 (symmetric with the review job): try
+          # the PR-comment fallback BEFORE defaulting to PARSE_FAILED.
+          if [ "$file_verdict" = "PARSE_FAILED" ] && [ -n "$comment_verdict" ]; then
+            echo "::notice::security verdict recovered from PR comment despite file PARSE_FAILED (issue #625 fallback took priority over issue #612 sentinel)"
+            verdict="$comment_verdict"
+            verdict_source="agent-pr-comment-fallback"
+            agent_ran="true"
+          elif [ "$file_verdict" = "PARSE_FAILED" ]; then
+            # Issue #612 sentinel.
+            echo "::warning::security verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line, no claude-prefixed comment with verdict); gate will hard-fail with parse-failed-no-verdict remediation"
             verdict="PARSE_FAILED"
             verdict_source="parse-failed-no-verdict"
             agent_ran="true"
@@ -670,7 +691,7 @@ jobs:
             verdict_source="agent-output-file"
             agent_ran="true"
           elif [ -n "$comment_verdict" ]; then
-            echo "::notice::security verdict recovered from PR comment (issue #625 fallback)"
+            echo "::notice::security verdict recovered from PR comment (issue #625 fallback; agent execution file was empty)"
             verdict="$comment_verdict"
             verdict_source="agent-pr-comment-fallback"
             agent_ran="true"
