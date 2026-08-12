@@ -26,7 +26,11 @@ import re
 import subprocess
 import sys
 
-VERDICT_RE = re.compile(r"^\s*Verdict:\s*(Approve|Changes Requested|Blocked)\s*$")
+# Anchored MULTILINE matcher; identical to the pattern in
+# scripts/extract-verdict.py (review finding #2 in PR #49: consolidate
+# both parsers onto one matcher so they cannot diverge). Keep the
+# pattern string in sync if either side changes.
+VERDICT_RE = re.compile(r'^\s*Verdict:\s*(Approve|Blocked|Changes Requested)\s*$', re.MULTILINE)
 
 
 def is_claude_bot(author_login: str) -> bool:
@@ -63,13 +67,18 @@ def fetch_comments(pr_number: str) -> list:
 
 
 def first_verdict(body: str) -> str:
-    """Return the first parseable Verdict: <value> line in body, or ''."""
+    """Return the LAST parseable Verdict: <value> line in body, or ''.
+
+    Anchored MULTILINE match (shares regex with extract-verdict.py) so
+    a body with mid-sentence "Verdict:" tokens can't outrank the real
+    whole-line conclusion. Returns the LAST match to match the file
+    parser's "last message wins" semantic.
+    """
     if not body:
         return ""
-    for line in body.splitlines():
-        m = VERDICT_RE.match(line)
-        if m:
-            return m.group(1)
+    matches = VERDICT_RE.findall(body)
+    if matches:
+        return matches[-1]
     return ""
 
 

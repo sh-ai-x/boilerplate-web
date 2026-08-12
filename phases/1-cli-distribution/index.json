@@ -8,10 +8,10 @@
   "value_score": 125.0,
   "evidence_count": 3,
   "totals": {
-    "completed": 3,
+    "completed": 1,
     "blocked": 0,
-    "pending": 3,
-    "completion_pct": 50.0
+    "pending": 5,
+    "completion_pct": 16.67
   },
   "steps": [
     {

@@ -67,7 +67,7 @@ import re
 import sys
 from pathlib import Path
 
-VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
+VERDICT_RE = re.compile(r'^\s*Verdict:\s*(Approve|Blocked|Changes Requested)\s*$', re.MULTILINE)
 
 # Sentinel emitted when the agent's output file exists and is parseable
 # JSONL but no assistant message contains a `Verdict:` line. The
@@ -114,10 +114,17 @@ def _extract_verdict_from_messages(messages: list) -> str:
                 texts.append(result_field)
         else:
             continue
+        # Anchored MULTILINE match: pick the LAST whole-line verdict in
+        # the text. The unanchored .search() was the root cause of
+        # finding #1 in PR #49's review (mid-sentence "Verdict:" tokens
+        # outranked the real conclusion). Use .findall() to enumerate
+        # whole-line matches and take the last one — semantically
+        # equivalent to the comment parser's per-line .match() walk
+        # over the most recent claude[bot] comment body.
         for t in texts:
-            m = VERDICT_RE.search(t)
-            if m:
-                last_verdict = m.group(1)
+            matches = VERDICT_RE.findall(t)
+            if matches:
+                last_verdict = matches[-1]
     return last_verdict
 
 
