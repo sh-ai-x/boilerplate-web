@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Extract Verdict from the most recent claude-prefixed PR comment.
 
+Returns the LAST whole-line `Verdict: <value>` match in the comment
+body (last-match-wins, anchored MULTILINE; see PR #49 review fix).
+
 Usage:
     python3 scripts/extract-verdict-from-comment.py <pr_number>
 
@@ -66,8 +69,11 @@ def fetch_comments(pr_number: str) -> list:
         return []
 
 
-def first_verdict(body: str) -> str:
+def last_verdict(body: str) -> str:
     """Return the LAST parseable Verdict: <value> line in body, or ''.
+
+    NOTE: name kept as first_verdict for backwards compatibility, but the
+    behavior is "last match" since PR #49 review fix.
 
     Anchored MULTILINE match (shares regex with extract-verdict.py) so
     a body with mid-sentence "Verdict:" tokens can't outrank the real
@@ -103,7 +109,7 @@ def main_with_arg(pr_number: str) -> str:
         author = c.get("author", "")
         if not is_claude_bot(author):
             continue
-        v = first_verdict(c.get("body", ""))
+        v = last_verdict(c.get("body", ""))
         if v:
             _log(f"matched claude-bot verdict={v}")
             return v

@@ -3,7 +3,7 @@
 Covers:
   - VERDICT_RE strict match (Approve / Changes Requested / Blocked)
   - is_claude_bot login suffix matching
-  - first_verdict walks lines top-down, returns first match
+  - last_verdict walks lines top-down, returns LAST match (last-match-wins per PR #49 review fix)
   - end-to-end main() with mocked gh pr view
 """
 from __future__ import annotations
@@ -40,10 +40,16 @@ class TestVerdictRegex:
             ("Verdict: Unknown", ""),  # unknown value rejected
             ("", ""),
             ("Just text, no verdict line.", ""),
+            # Last-match-wins (PR #49 review fix): if multiple whole-line
+            # verdicts appear, return the LAST one. Earlier this picked
+            # the first; that allowed mid-sentence "Verdict:" tokens to
+            # outrank the real conclusion.
+            ("Verdict: Approve\nSome details\nVerdict: Blocked", "Blocked"),
+            ("Some intro\nVerdict: Changes Requested\nFooter text\nVerdict: Approve", "Approve"),
         ],
     )
-    def test_first_verdict(self, body: str, expected: str) -> None:
-        assert evfc.first_verdict(body) == expected
+    def test_last_verdict(self, body: str, expected: str) -> None:
+        assert evfc.last_verdict(body) == expected
 
 
 class TestIsClaudeBot:

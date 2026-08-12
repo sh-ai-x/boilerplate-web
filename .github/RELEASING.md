@@ -8,6 +8,31 @@ pattern.
 
 ---
 
+## 0. Prerequisite: verify the publish workflow exists
+
+This guide assumes `.github/workflows/publish.yml` is present on `main`
+(step 2 of the `1-cli-distribution` plan: `ci-publish-workflow`). If it is
+not yet merged, **stop here and merge it first** — otherwise §2 will
+push a tag that fires nothing, and §3's `workflow_dispatch` recovery
+points at the same missing workflow.
+
+Sanity check before tagging:
+
+```bash
+gh workflow list --repo "$REPO" | grep -i publish
+```
+
+A working setup prints at least one row with `publish` in the name. An
+empty result means the publish workflow has not landed yet; do not
+proceed to §2.
+
+To verify which step owns the workflow, see
+`phases/1-cli-distribution/index.json` (look for `step: 2` with
+`name: ci-publish-workflow`); its `status` should be `completed` before
+this guide is followed.
+
+---
+
 ## 1. Decide the next semver bump
 
 `package.json` ships as `0.1.0` and evolves under semver rules:
