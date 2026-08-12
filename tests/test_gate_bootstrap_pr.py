@@ -89,39 +89,71 @@ class TestGateBootstrapPR(unittest.TestCase):
         return _extract_run_block(self.workflow_text, "Combined verdict gate")
 
     def test_gate_script_has_bootstrap_pr_detection(self) -> None:
-        """The gate must query the PR's changed files to detect bootstrap case."""
-        script = self._combined_gate_script()
-        self.assertIn("/pulls/", script)
-        self.assertIn("/files", script)
-        self.assertIn(".github/workflows/", script)
-        self.assertIn("jq", script)
-        self.assertIn("pr_touches_workflow", script)
-        self.assertIn("-gt 0", script)
+        """Bootstrap-PR detection lives in the per-job `Detect bootstrap-PR fallback`
+        step (id: fallback), not in the combined gate. The gate itself now
+        reads `needs.<job>.outputs.agent_ran` (set by the per-job
+        `Extract <skill> verdict` step's fallback branch to `false`) to
+        short-circuit. This structural contract is the inverse of the
+        pre-v0.3.247 layout (where the gate queried the PR's files
+        directly) and is what allows the same gate logic to be reused
+        across `pull_request` and `workflow_dispatch` event modes.
+        """
+        # The combined gate must read the bootstrap signal from job outputs
+        # via `agent_ran`, not via a fresh `gh api /pulls/.../files` call.
+        gate = self._combined_gate_script()
+        self.assertIn("R_AGENT", gate)
+        self.assertIn("S_AGENT", gate)
+        self.assertIn("agent_ran", gate)
+
+        # The bootstrap detection itself must live in a dedicated step
+        # named `Detect bootstrap-PR fallback`, run after each agent job.
+        self.assertIn("- name: Detect bootstrap-PR fallback", self.workflow_text)
+
+        # That step must query the PR's files for `.github/workflows/`.
+        detect = _extract_run_block(self.workflow_text, "Detect bootstrap-PR fallback")
+        self.assertIn("gh pr diff", detect)
+        self.assertIn("--name-only", detect)
+        self.assertIn(".github/workflows/", detect)
+        self.assertIn("needs_fallback", detect)
 
     def test_gate_script_warns_on_bootstrap_case(self) -> None:
-        """The bootstrap branch must emit ::warning:: and exit 0 (Approve)."""
-        script = self._combined_gate_script()
-        bootstrap_match = re.search(
-            r"pr_touches_workflow.*?\n(.*?)echo \"::error::review\+security gate: AI agent was skipped\"",
-            script,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(
-            bootstrap_match,
-            "bootstrap-PR branch not found before the install-broken hard-fail",
-        )
-        bootstrap_block = bootstrap_match.group(1)
-        self.assertIn("::warning::", bootstrap_block)
-        self.assertRegex(bootstrap_block, r"Approve\)\s*exit 0")
+        """The combined gate now hard-fails when `agent_ran=false` (the
+        unambiguous signal that claude-code-action@v1's workflow-validation
+        guard refused to run). The bootstrap case is therefore expressed as
+        a hard-fail with the `AI agent was skipped` remediation, not as a
+        warn+Approve branch in the gate. The fallback comment path still
+        posts the `Verdict: Approve` audit comment via the per-job
+        `Post fallback verdict comment` step, but the gate itself surfaces
+        the install-broken remediation so the operator sees the issue.
+        """
+        gate = self._combined_gate_script()
+        # The gate must short-circuit on agent_ran=false with the
+        # `AI agent was skipped` message.
+        self.assertIn("review+security gate: AI agent was skipped", gate)
+        self.assertIn("R_AGENT", gate)
+        self.assertIn('"false"', gate)
+        self.assertRegex(gate, r"exit 1\b")
+
+        # The companion `Post fallback verdict comment` step in each job
+        # posts a `Verdict: Approve` audit comment so the gate's regex can
+        # still parse a verdict from the comment thread.
+        self.assertIn("- name: Post fallback verdict comment (review)", self.workflow_text)
+        self.assertIn("- name: Post fallback verdict comment (security)", self.workflow_text)
 
     def test_gate_script_keeps_install_broken_hard_fail(self) -> None:
         """The install-broken hard-fail must still exist (after the bootstrap branch)."""
         script = self._combined_gate_script()
+        # Updated for v0.3.247: the remediation message lists the four
+        # concrete failure modes (DEV_KIT_GITHUB_TOKEN, MINIMAX/ANTHROPIC/
+        # DEEPSEEK API key, plugin install, action rate-limit) instead of
+        # the older single-line phrase.
         self.assertIn(
-            "DEV_KIT_GITHUB_TOKEN missing, action rate-limit, plugin",
+            "DEV_KIT_GITHUB_TOKEN secret missing or expired",
             script,
             "install-broken remediation message not found",
         )
+        self.assertIn("MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing", script)
+        self.assertIn("anthropics/claude-code-action@v1 rate-limit", script)
         self.assertIn("exit 1", script)
 
     def test_gate_env_has_pr_number(self) -> None:

@@ -77,6 +77,50 @@ VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
 PARSE_FAILED = "PARSE_FAILED"
 
 
+def _extract_verdict_from_messages(messages: list) -> str:
+    """Scan a list of message dicts and return the LAST `Verdict:` line
+    found in any assistant message's text content or in a top-level
+    `result`-type message's `result` string. Returns empty string if no
+    verdict line is found (caller decides what that means)."""
+    last_verdict = ""
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        msg_type = msg.get("type")
+        texts: list[str] = []
+        if msg_type == "assistant":
+            # Content can be in `message.content` (list of content blocks,
+            # claude-code SDK) or directly in `content` (string, some wrappers).
+            content = msg.get("message", {}).get("content")
+            if content is None:
+                content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        texts.append(str(block.get("text", "")))
+                    elif isinstance(block, str):
+                        texts.append(block)
+            elif isinstance(content, str):
+                texts.append(content)
+        elif msg_type == "result":
+            # Per @anthropic-ai/claude-agent-sdk SDKMessage contract, the
+            # canonical "final answer" is a `type: "result"` event with a
+            # plain string `result` field. boilerplate-web PR #49 repro:
+            # claude-code-action@v1 with provider=minimax emits the
+            # verdict here (and only here) — assistant text blocks carry
+            # only intermediate tool_use turns. Read it as a string.
+            result_field = msg.get("result")
+            if isinstance(result_field, str):
+                texts.append(result_field)
+        else:
+            continue
+        for t in texts:
+            m = VERDICT_RE.search(t)
+            if m:
+                last_verdict = m.group(1)
+    return last_verdict
+
+
 def extract(path: Path) -> str:
     if not path.exists():
         return ""
@@ -94,41 +138,35 @@ def extract(path: Path) -> str:
     # Also bail if the file is suspiciously small or empty.
     if len(text) < 10:
         return ""
+
     last_verdict = ""
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        # Bail on any non-{ line — JSON-lines is strict.
-        if not line.startswith("{"):
-            continue
+    stripped = text.lstrip()
+    # Accept both JSONL (one JSON object per line) and pretty-printed
+    # JSON arrays (`JSON.stringify(messages, null, 2)` from the
+    # actual claude-code-action writer). The pretty-printed array
+    # format is the canonical shape from v0.3.247+; the JSONL path is
+    # preserved for older wrappers and ad-hoc test fixtures.
+    if stripped.startswith("["):
         try:
-            msg = json.loads(line)
+            messages = json.loads(text)
         except json.JSONDecodeError:
-            continue
-        if not isinstance(msg, dict):
-            continue
-        if msg.get("type") != "assistant":
-            continue
-        # Content can be in `message.content` (list of content blocks,
-        # claude-code SDK) or directly in `content` (string, some
-        # wrappers).
-        content = msg.get("message", {}).get("content")
-        if content is None:
-            content = msg.get("content")
-        texts: list[str] = []
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    texts.append(str(block.get("text", "")))
-                elif isinstance(block, str):
-                    texts.append(block)
-        elif isinstance(content, str):
-            texts.append(content)
-        for t in texts:
-            m = VERDICT_RE.search(t)
-            if m:
-                last_verdict = m.group(1)
+            return PARSE_FAILED
+        if not isinstance(messages, list):
+            return PARSE_FAILED
+        last_verdict = _extract_verdict_from_messages(messages)
+    else:
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # Bail on any non-{ line — JSON-lines is strict.
+            if not line.startswith("{"):
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            last_verdict = _extract_verdict_from_messages([msg]) or last_verdict
     # Issue #612 fix: file passed the basic shape checks (exists, not
     # HTML, has content) but no assistant message contained a
     # recognizable `Verdict:` line. Either the JSONL was garbled, the
