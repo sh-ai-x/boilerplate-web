@@ -63,11 +63,14 @@ path). Exits 0 always.
 from __future__ import annotations
 
 import json
-import re
 import sys
 from pathlib import Path
 
-VERDICT_RE = re.compile(r'Verdict:\s*(Approve|Blocked|Changes Requested)\b')
+# Import the canonical VERDICT_RE from the shared module so this
+# parser and scripts/extract-verdict-from-comment.py cannot drift
+# apart. Review finding from PR #49: consolidate to one matcher.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _verdict_pattern import VERDICT_RE  # noqa: E402
 
 # Sentinel emitted when the agent's output file exists and is parseable
 # JSONL but no assistant message contains a `Verdict:` line. The
@@ -114,10 +117,18 @@ def _extract_verdict_from_messages(messages: list) -> str:
                 texts.append(result_field)
         else:
             continue
+        # Anchored MULTILINE match: pick the LAST whole-line verdict in
+        # the text. The unanchored .search() was the root cause of
+        # finding #1 in PR #49's review (mid-sentence "Verdict:" tokens
+        # outranked the real conclusion). Use .findall() to enumerate
+        # whole-line matches and take the last one — the comment
+        # parser (scripts/extract-verdict-from-comment.py) uses the
+        # same VERDICT_RE from scripts/_verdict_pattern.py, so the two
+        # paths cannot drift apart.
         for t in texts:
-            m = VERDICT_RE.search(t)
-            if m:
-                last_verdict = m.group(1)
+            matches = VERDICT_RE.findall(t)
+            if matches:
+                last_verdict = matches[-1]
     return last_verdict
 
 

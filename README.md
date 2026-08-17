@@ -3,8 +3,6 @@
 > `npx create-boilerplate-web <folder> --type=<saas|shop|portfolio>` —
 > scaffold a Next.js + Supabase + Cloudflare + Toss template into a target folder.
 
-Latest release: [the latest release lives at https://www.npmjs.com/package/create-boilerplate-web](https://www.npmjs.com/package/create-boilerplate-web).
-
 This repo is the source-of-truth for the `create-boilerplate-web` CLI and
 three independently-buildable templates. Pick the type that matches what you
 are shipping, scaffold it into a fresh folder, and customize from there.

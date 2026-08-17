@@ -18,5 +18,6 @@ __pycache__/
 
 .tmp-tests
 
-# Build artifacts (esbuild bundle output from scripts/build-cli.js).
+# Build artifact (regenerated per release via `npm run build:cli`; shipped via
+# the npm `files` allow-list in package.json, never via git history)
 dist/

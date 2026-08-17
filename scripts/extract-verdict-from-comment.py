@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Extract Verdict from the most recent claude-prefixed PR comment.
 
+Returns the LAST whole-line `Verdict: <value>` match in the comment
+body (last-match-wins, anchored MULTILINE; see PR #49 review fix).
+
 Usage:
     python3 scripts/extract-verdict-from-comment.py <pr_number>
 
@@ -8,10 +11,11 @@ Output:
     - empty string (no parseable verdict found)
     - "Approve" / "Changes Requested" / "Blocked"
 
-Reads from `gh pr view <pr_number> --json comments --jq '.comments[].body'`,
-finds comments where the author is a claude-prefixed bot
-(claude[bot], claude-code-action[bot], dev-kit-ci[bot], etc.), and parses
-the FIRST line of the comment body for the literal pattern `Verdict: <value>`.
+Reads from `gh pr view <pr_number> --json comments`, walks the
+comments newest-first, picks the first one whose author is a
+claude-prefixed bot (claude[bot], claude-code-action[bot],
+dev-kit-ci[bot], etc.), and returns the LAST whole-line
+`Verdict: <value>` match from that comment's body.
 
 This is the fallback path for issue #625 -- when
 anthropics/claude-code-action@v1 with provider=minimax writes a
@@ -22,11 +26,15 @@ to the PR conversation thread, which IS human-visible.
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
+from pathlib import Path
 
-VERDICT_RE = re.compile(r"^\s*Verdict:\s*(Approve|Changes Requested|Blocked)\s*$")
+# Import the canonical VERDICT_RE from the shared module so this
+# parser and scripts/extract-verdict.py cannot drift apart. Review
+# finding from PR #49: consolidate to one matcher.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _verdict_pattern import VERDICT_RE  # noqa: E402
 
 
 def is_claude_bot(author_login: str) -> bool:
@@ -62,14 +70,19 @@ def fetch_comments(pr_number: str) -> list:
         return []
 
 
-def first_verdict(body: str) -> str:
-    """Return the first parseable Verdict: <value> line in body, or ''."""
+def last_verdict(body: str) -> str:
+    """Return the LAST parseable Verdict: <value> line in body, or ''.
+
+    Anchored MULTILINE match (imported from scripts/_verdict_pattern.py)
+    so a body with mid-sentence "Verdict:" tokens can't outrank the real
+    whole-line conclusion. Returns the LAST match to match the file
+    parser's "last message wins" semantic (PR #49 review fix).
+    """
     if not body:
         return ""
-    for line in body.splitlines():
-        m = VERDICT_RE.match(line)
-        if m:
-            return m.group(1)
+    matches = VERDICT_RE.findall(body)
+    if matches:
+        return matches[-1]
     return ""
 
 
@@ -94,7 +107,7 @@ def main_with_arg(pr_number: str) -> str:
         author = c.get("author", "")
         if not is_claude_bot(author):
             continue
-        v = first_verdict(c.get("body", ""))
+        v = last_verdict(c.get("body", ""))
         if v:
             _log(f"matched claude-bot verdict={v}")
             return v
