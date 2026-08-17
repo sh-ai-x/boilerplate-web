@@ -11,10 +11,11 @@ Output:
     - empty string (no parseable verdict found)
     - "Approve" / "Changes Requested" / "Blocked"
 
-Reads from `gh pr view <pr_number> --json comments --jq '.comments[].body'`,
-finds comments where the author is a claude-prefixed bot
-(claude[bot], claude-code-action[bot], dev-kit-ci[bot], etc.), and parses
-the FIRST line of the comment body for the literal pattern `Verdict: <value>`.
+Reads from `gh pr view <pr_number> --json comments`, walks the
+comments newest-first, picks the first one whose author is a
+claude-prefixed bot (claude[bot], claude-code-action[bot],
+dev-kit-ci[bot], etc.), and returns the LAST whole-line
+`Verdict: <value>` match from that comment's body.
 
 This is the fallback path for issue #625 -- when
 anthropics/claude-code-action@v1 with provider=minimax writes a
@@ -25,15 +26,15 @@ to the PR conversation thread, which IS human-visible.
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
+from pathlib import Path
 
-# Anchored MULTILINE matcher; identical to the pattern in
-# scripts/extract-verdict.py (review finding #2 in PR #49: consolidate
-# both parsers onto one matcher so they cannot diverge). Keep the
-# pattern string in sync if either side changes.
-VERDICT_RE = re.compile(r'^\s*Verdict:\s*(Approve|Blocked|Changes Requested)\s*$', re.MULTILINE)
+# Import the canonical VERDICT_RE from the shared module so this
+# parser and scripts/extract-verdict.py cannot drift apart. Review
+# finding from PR #49: consolidate to one matcher.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _verdict_pattern import VERDICT_RE  # noqa: E402
 
 
 def is_claude_bot(author_login: str) -> bool:
@@ -72,13 +73,10 @@ def fetch_comments(pr_number: str) -> list:
 def last_verdict(body: str) -> str:
     """Return the LAST parseable Verdict: <value> line in body, or ''.
 
-    NOTE: name kept as first_verdict for backwards compatibility, but the
-    behavior is "last match" since PR #49 review fix.
-
-    Anchored MULTILINE match (shares regex with extract-verdict.py) so
-    a body with mid-sentence "Verdict:" tokens can't outrank the real
+    Anchored MULTILINE match (imported from scripts/_verdict_pattern.py)
+    so a body with mid-sentence "Verdict:" tokens can't outrank the real
     whole-line conclusion. Returns the LAST match to match the file
-    parser's "last message wins" semantic.
+    parser's "last message wins" semantic (PR #49 review fix).
     """
     if not body:
         return ""
