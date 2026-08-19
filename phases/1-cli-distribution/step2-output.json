@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "step": 2,
+  "name": "ci-publish-workflow",
+  "branch": "fix/1-cli-distribution-step2",
+  "exit_code": 0,
+  "stdout": "AC3.1a=0 AC3.1b=0 AC3.1c=0 AC3.1d=0 AC3.2=0 AC3.3=0 AC3.4=0 AC3.5=0 AC3.6=0 AC3.7=0\nnpm run build:cli -> dist/cli.js built OK\nnode dist/cli.js --help -> prints create-boilerplate-web usage banner\nnpm test -> 55/55 pass, 0 fail",
+  "stderr": "",
+  "timestamp": "2026-08-19T13:03:09Z",
+  "verification": {
+    "AC3.1a_file_present": "PASS",
+    "AC3.1b_npm_publish_present": "PASS",
+    "AC3.1c_oidc_id_token_write": "PASS",
+    "AC3.1d_tag_trigger_pattern": "PASS",
+    "AC3.2_no_npm_token": "PASS",
+    "AC3.3_dist_tag_derived": "PASS",
+    "AC3.4_npm_publish_environment": "PASS",
+    "AC3.5_workflow_dispatch_main_only": "PASS",
+    "AC3.6_smoke_check_step": "PASS",
+    "AC3.7_yaml_parses": "PASS",
+    "local_pipeline_dry_run": {
+      "build_cli": "PASS",
+      "cli_help_smoke": "PASS",
+      "test_suite": "55/55 PASS"
+    }
+  },
+  "files_created": [
+    ".github/workflows/publish.yml",
+    "phases/1-cli-distribution/step2.md"
+  ],
+  "notes": "Step 2 was written and AC-verified twice before (PR #46, PR #51) but both times publish.yml was reverted out of the PR before merge, so it never actually landed on main -- PR #51 merged only .nvmrc + index.json bookkeeping. This pass restores the identical, previously-reviewed publish.yml content unchanged (SHA-pinned actions, OIDC id-token:write, npm-publish environment gate, dist-tag derivation, post-build smoke check, cancel-in-progress:false) and additionally dry-runs the pipeline it drives locally: build:cli, --help smoke check, and the full test suite (55/55) all pass. External prerequisite before the first tag push can succeed: create-boilerplate-web must be registered as a trusted publisher for this repo+workflow on npmjs.org, and the npm-publish GitHub Environment needs required reviewers configured -- both are one-time manual steps outside this repo.",
+  "commit_message_commit1": "fix(1-cli-distribution): restore step 2 -- .github/workflows/publish.yml (reverted twice, never merged)",
+  "commit_message_commit2": "docs(1-cli-distribution): reconcile index.json with actual PR-history state"
+}
