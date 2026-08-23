@@ -153,7 +153,17 @@ class TestGateBootstrapPR(unittest.TestCase):
             "install-broken remediation message not found",
         )
         self.assertIn("MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing", script)
-        self.assertIn("anthropics/claude-code-action@v1 rate-limit", script)
+        # Updated for v0.3.296: the action reference is now SHA-pinned
+        # (`@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1` in the workflow
+        # source) instead of the unpinned `@v1` form. Match either so the
+        # test is robust against future SHA-pin updates: the action name
+        # (`anthropics/claude-code-action`) and the remediation token
+        # (`rate-limit`) are the semantic content we want to assert on,
+        # not the exact pin form.
+        self.assertRegex(
+            script,
+            r"anthropics/claude-code-action@(?:\S+\s+#\s+v1|v1)\s+rate-limit",
+        )
         self.assertIn("exit 1", script)
 
     def test_gate_env_has_pr_number(self) -> None:
