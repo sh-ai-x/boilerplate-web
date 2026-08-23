@@ -3,7 +3,9 @@
   "phase": "1-cli-distribution",
   "project": "boilerplate-web",
   "created_at": "2026-07-30T00:00:00Z",
-  "worktree": "plan/boilerplate-cli-distribution",
+  "updated_at": "2026-08-23T11:00:00Z",
+  "worktree": "plan/1-cli-distribution-replan",
+  "based_on_main_sha": "c72fb63",
   "ambiguity_score": 2,
   "value_score": 125.0,
   "evidence_count": 3,
@@ -19,7 +21,16 @@
       "name": "npm-package-config",
       "title": "Finalize npm package config (bin, files, publishConfig, name)",
       "status": "pending",
-      "ambiguity_delta": 0.0
+      "ambiguity_delta": 0.0,
+      "resets": [
+        {
+          "at": "2026-08-23T11:00:00+0900",
+          "from": "error",
+          "reason": "claude --workdir flag incompatibility; switching runner to codex via DEV_KIT_BUILD_AGENT=codex",
+          "previous_error_message": "claude exited 1",
+          "previous_failed_at": "2026-08-23T10:58:27+0900"
+        }
+      ]
     },
     {
       "step": 1,
@@ -33,7 +44,8 @@
       "name": "ci-publish-workflow",
       "title": ".github/workflows/publish.yml with OIDC trusted publishing",
       "status": "pending",
-      "ambiguity_delta": 0.0
+      "ambiguity_delta": 0.0,
+      "historical_note": "publish.yml exists on fix/1-cli-distribution-step2 branch (commit 924aed0) but NOT on main; PR #51 was reverted; this build will regenerate it from the step2.md preamble"
     },
     {
       "step": 3,
@@ -55,8 +67,23 @@
       "title": "Tag-trigger release flow for v0.x + release guide",
       "status": "completed",
       "ambiguity_delta": 0.0,
-      "last_update": "2026-07-30T16:17:39Z"
+      "last_update": "2026-07-30T16:17:39Z",
+      "pr": { "number": 49, "merged_at": "2026-08-17T..." }
     }
   ],
-  "updated_at": "2026-07-30T16:17:39Z"
+  "build_recovery": {
+    "agent_switch": {
+      "from": "claude",
+      "to": "codex",
+      "env": "DEV_KIT_BUILD_AGENT=codex",
+      "reason": "runner invoked `claude --workdir <wt>` but installed claude CLI does not recognize --workdir flag",
+      "at": "2026-08-23T11:00:00+0900"
+    },
+    "worktree_base_change": {
+      "from": "plan/boilerplate-cli-distribution",
+      "to": "plan/1-cli-distribution-replan",
+      "reason": "replan branch carries the regenerated step preambles",
+      "at": "2026-08-23T11:00:00+0900"
+    }
+  }
 }
