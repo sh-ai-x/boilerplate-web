@@ -1,0 +1,8 @@
+Bash	sed -n '1,240p' /Users/sanghee/.codex/plugins/cache/dev-kit/dev-kit/0.3.311/skil
+Bash	ls -la /Users/sanghee/.codex/plugins/cache/dev-kit/dev-kit/0.3.311/skills | head
+Bash	printf '%s\n' '--- tracked/context files ---'; rg --files -g 'PRD.md' -g '.dev-k
+Bash	git status --short; printf '%s\n' '--- relevant paths ---'; rg --files phases .d
+Bash	set +e run_ac() {   label="$1"   shift   "$@"   code=$?   echo "$label exit code
+Bash	set +e printf '%s\n' '--- AC1 ---'; test -f .github/workflows/publish.yml; echo 
+Bash	grep -qE '^\s*tags:\s*\[\s*.v\*.\s*\]' .github/workflows/publish.yml; code=$?; e
+Bash	set +e ac1='test -f .github/workflows/publish.yml' ac2="grep -qE '^\\s*tags:\\s*

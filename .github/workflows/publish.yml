@@ -1,0 +1,26 @@
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4 # registry-url configured below for npm publishing
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org/
+      - run: npm ci
+      - run: npm run build:cli
+      - run: npm publish --provenance --access public
