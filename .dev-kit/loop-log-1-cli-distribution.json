@@ -1,0 +1,88 @@
+{
+  "schema_version": "1.0.0",
+  "phase": "1-cli-distribution",
+  "project": "boilerplate-web",
+  "safety_valve": 8,
+  "user_interrupt": false,
+  "mode": "replan",
+  "replan_of": {
+    "original_emitted_at": "2026-07-30T00:00:00Z",
+    "reason": "step preambles lost in 2026-08 CI-fix wave; framing unchanged; scores carry forward"
+  },
+  "cycles": [
+    {
+      "cycle": 1,
+      "gate": 1,
+      "action": "frame",
+      "captured": {
+        "goal": "Ship `npx create-boilerplate-web <folder> --type=<saas|shop|portfolio>` as a published npm package with OIDC trusted publishing, so users can scaffold from any directory without cloning the repo first.",
+        "target_user": "Solo indie hacker (extends 0-mvp persona) — runs `npx create-... my-saas --type=saas` from their home directory, not from a cloned boilerplate-web checkout.",
+        "situation": "Today the CLI only works via `node cli/index.js` inside a clone of boilerplate-web. Users have to git-clone the full repo (including templates + Edge Functions + tests) just to scaffold a new project."
+      },
+      "next_action": "gate 2 — validate (carry-forward)"
+    },
+    {
+      "cycle": 2,
+      "gate": 2,
+      "action": "validate carry-forward",
+      "narrowed_delta": {
+        "evidence_count": { "before": 0, "after": 3, "delta": 3, "source": "carry-forward from 2026-07-30 plan" },
+        "value_score": { "before": 0.0, "after": 125.0, "delta": 125.0, "source": "carry-forward from 2026-07-30 plan" },
+        "ambiguity": { "before": 10, "after": 2, "delta": -8, "source": "carry-forward from 2026-07-30 plan" }
+      },
+      "convergence": {
+        "evidence_count_pass": true,
+        "value_score_pass": true,
+        "ambiguity_pass": true
+      },
+      "next_action": "gate 3 — non-goals"
+    },
+    {
+      "cycle": 3,
+      "gate": 3,
+      "action": "non-goals (3 captured)",
+      "captured": [
+        { "id": 1, "non_goal": "no non-npm install path", "breach_response": "open feat(install-alternatives)" },
+        { "id": 2, "non_goal": "no multi-template bundle", "breach_response": "open feat(multi-scaffold)" },
+        { "id": 3, "non_goal": "no auto-update / self-update mechanism", "breach_response": "defer to npm-native update flow" }
+      ],
+      "next_action": "gate 4 — decompose (emit 5 step preambles)"
+    },
+    {
+      "cycle": 4,
+      "gate": 4,
+      "action": "decompose",
+      "emitted": [
+        "phases/1-cli-distribution/step0.md",
+        "phases/1-cli-distribution/step1.md",
+        "phases/1-cli-distribution/step2.md",
+        "phases/1-cli-distribution/step3.md",
+        "phases/1-cli-distribution/step4.md"
+      ],
+      "skipped_step": { "step": 5, "reason": "already shipped via PR #49 (commit 7cca42e, 2026-08-17)" },
+      "next_action": "gate 5 — emit PRD + hand-off"
+    },
+    {
+      "cycle": 5,
+      "gate": 5,
+      "action": "emit",
+      "emitted": [
+        "PRD-1-cli-distribution.md",
+        ".dev-kit/decision-log.md",
+        ".dev-kit/hand-off/plan→build-1-cli-distribution.md",
+        ".dev-kit/loop-log-1-cli-distribution.json (this file)"
+      ],
+      "convergence": {
+        "frame_present": true,
+        "validate_scores_present": true,
+        "non_goals_count": 3,
+        "phase_plan_points_at_index_json": true,
+        "step_count_in_plan": 6,
+        "hand_off_names_build": true
+      },
+      "next_action": "user invokes /dev-kit:build 1-cli-distribution"
+    }
+  ],
+  "final_status": "pass",
+  "emitted_at": "2026-08-23T00:00:00Z"
+}
