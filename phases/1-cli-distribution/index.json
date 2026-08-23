@@ -8,10 +8,10 @@
   "value_score": 125.0,
   "evidence_count": 3,
   "totals": {
-    "completed": 1,
+    "completed": 2,
     "blocked": 0,
-    "pending": 5,
-    "completion_pct": 16.67
+    "pending": 4,
+    "completion_pct": 33.33
   },
   "steps": [
     {
@@ -39,8 +39,9 @@
       "step": 3,
       "name": "e2e-scaffold-test",
       "title": "CI matrix: end-to-end scaffold test for saas/shop/portfolio",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "summary": ".github/workflows/e2e-scaffold.yml matrix [saas,shop,portfolio] + --type=invalid negative case + dist/cli.js bundle; AC1-AC8 green"
     },
     {
       "step": 4,

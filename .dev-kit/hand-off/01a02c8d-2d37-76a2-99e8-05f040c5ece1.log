@@ -1,0 +1,6 @@
+Bash	pwd && find . -path '*/rules/*.md' -o -path './rules/*.md' | sort && printf '\n-
+Bash	set +e printf '%s\n' '--- markdown rules ---' find . -type f -path '*/rules/*.md
+Bash	printf '%s\n' '--- package ---'; sed -n '1,240p' package.json; printf '%s\n' '--
+Bash	set +e f=.github/workflows/e2e-scaffold.yml run_ac() { n="$1"; shift; "$@" >/tmp
+Bash	set +e printf '%s\n' '--- lockfile ---' ls package-lock.json npm-shrinkwrap.json
+Bash	set +e f=.github/workflows/e2e-scaffold.yml run_ac() { n="$1"; shift; "$@" >/tmp

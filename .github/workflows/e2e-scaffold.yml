@@ -1,0 +1,46 @@
+name: e2e-scaffold
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        type: [saas, shop, portfolio]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+      - run: npm run build:cli
+
+      - name: Scaffold ${{ matrix.type }} template
+        run: |
+          rm -rf "/tmp/e2e-${{ matrix.type }}"
+          node dist/cli.js "/tmp/e2e-${{ matrix.type }}" --type=${{ matrix.type }}
+
+      - name: Assert scaffold structure and package name
+        run: |
+          test -f "/tmp/e2e-${{ matrix.type }}/package.json"
+          test -d "/tmp/e2e-${{ matrix.type }}/app"
+          test "$(node -p "require('/tmp/e2e-${{ matrix.type }}/package.json').name")" = "e2e-${{ matrix.type }}"
+
+      - name: Reject invalid template type
+        run: |
+          rm -rf /tmp/e2e-bad
+          if node dist/cli.js /tmp/e2e-bad --type=invalid; then
+            echo "invalid template type was accepted"
+            exit 1
+          fi
+          test ! -e /tmp/e2e-bad
