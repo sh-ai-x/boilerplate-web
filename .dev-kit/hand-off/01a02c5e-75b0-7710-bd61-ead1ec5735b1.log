@@ -1,0 +1,7 @@
+Bash	sed -n '1,240p' /Users/sanghee/.codex/plugins/cache/dev-kit/dev-kit/0.3.300/skil
+Bash	sed -n '1,260p' /Users/sanghee/.codex/plugins/cache/dev-kit/dev-kit/0.3.300/skil
+Bash	printf '%s\n' '--- top-level ---'; rg --files -g '!node_modules' | sed -n '1,160
+Bash	set +e node -e "console.log(require('./package.json').name)" | grep -q '^create-
+Bash	set +e npm_config_cache=/tmp/cbw-npm-cache-step0 npm pack --dry-run 2>&1 | tee /
+Bash	set +e node -e "console.log(require('./package.json').name)" | grep -q '^create-
+Bash	git diff -- package.json LICENSE phases/1-cli-distribution/index.json; printf '%

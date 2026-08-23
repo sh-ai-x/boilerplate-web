@@ -1,19 +1,23 @@
 {
   "name": "create-boilerplate-web",
   "version": "0.1.0",
-  "description": "Scaffold a Next.js + Supabase + Cloudflare + Toss template (saas, shop, or portfolio) into a target folder.",
+  "description": "Scaffold a Next.js + Supabase + Cloudflare + Toss boilerplate (saas / shop / portfolio).",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sh-ai-x/boilerplate-web.git"
+    "url": "https://github.com/sanghee-dev/boilerplate-web.git"
   },
+  "bugs": {
+    "url": "https://github.com/sanghee-dev/boilerplate-web/issues"
+  },
+  "homepage": "https://github.com/sanghee-dev/boilerplate-web#readme",
   "bin": {
     "create-boilerplate-web": "dist/cli.js"
   },
   "type": "commonjs",
-  "main": "cli/index.js",
   "files": [
-    "dist/**",
-    "cli/**",
+    "dist",
+    "templates",
+    "cloudflare-rules.json",
     "templates.lock.json",
     "README.md",
     "LICENSE"
@@ -23,7 +27,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "build:cli": "node scripts/build-cli.js",
+    "build:cli": "tsc -p cli/tsconfig.json",
     "pretest": "npm run build:cli",
     "prepublishOnly": "npm run build:cli",
     "test": "node --test tests/*.test.js",
@@ -36,8 +40,9 @@
     "cloudflare",
     "toss",
     "saas",
-    "shop",
-    "portfolio"
+    "ecommerce",
+    "portfolio",
+    "create-boilerplate-web"
   ],
   "engines": {
     "node": ">=18.0.0"

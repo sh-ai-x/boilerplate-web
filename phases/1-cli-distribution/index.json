@@ -8,18 +8,19 @@
   "value_score": 125.0,
   "evidence_count": 3,
   "totals": {
-    "completed": 1,
+    "completed": 2,
     "blocked": 0,
-    "pending": 5,
-    "completion_pct": 16.67
+    "pending": 4,
+    "completion_pct": 33.33
   },
   "steps": [
     {
       "step": 0,
       "name": "npm-package-config",
       "title": "Finalize npm package config (bin, files, publishConfig, name)",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "summary": "package.json finalized as create-boilerplate-web v0.1.0 + LICENSE + npm-publishable allow-list; AC1-AC6 green"
     },
     {
       "step": 1,
@@ -58,5 +59,5 @@
       "last_update": "2026-07-30T16:17:39Z"
     }
   ],
-  "updated_at": "2026-07-30T16:17:39Z"
+  "updated_at": "2026-08-23T00:00:00Z"
 }
