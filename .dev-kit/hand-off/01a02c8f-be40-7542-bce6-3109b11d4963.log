@@ -1,0 +1,4 @@
+Bash	pwd; rg --files -g 'PRD.md' -g '.dev-kit/decision-log.md' -g 'phases/1-cli-distr
+Bash	printf '%s\n' '--- required paths ---'; for f in PRD.md .dev-kit/decision-log.md
+Bash	set +e printf 'AC1: '; grep -q 'npx create-boilerplate-web' README.md; c=$?; ech
+Bash	set +e node -e "JSON.parse(require('fs').readFileSync('phases/1-cli-distribution

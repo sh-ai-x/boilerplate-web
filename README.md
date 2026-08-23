@@ -18,7 +18,44 @@ are shipping, scaffold it into a fresh folder, and customize from there.
   Edge Functions. Prices live in a database table; clients can never inject
   an amount.
 
-## Quick start
+## Install & Scaffold (npm)
+
+The fastest way to scaffold a new project is via `npx`:
+
+```bash
+# SaaS template (Next.js + Supabase + Cloudflare + Toss billing-key)
+npx create-boilerplate-web my-saas-app --type=saas
+cd my-saas-app
+npm install
+cp .env.example .env.local
+```
+
+```bash
+# Shop template (Next.js + Supabase + Cloudflare + Toss single-payment)
+npx create-boilerplate-web my-shop --type=shop
+cd my-shop
+npm install
+```
+
+```bash
+# Portfolio template (Next.js + Supabase + MDX + Google OAuth write — no payment, no Cloudflare WAF)
+npx create-boilerplate-web my-portfolio --type=portfolio
+cd my-portfolio
+npm install
+```
+
+The CLI downloads only the template sub-folder (not the whole repo), rewrites `package.json#name`, and prints a numbered post-install checklist (`supabase link`, `supabase db push`, `supabase functions deploy`). See the [Quick-start](#quick-start) section below for the full per-template setup flow.
+
+### Requirements
+
+- Node.js ≥ 18
+- npm ≥ 9 (`npx` ships with npm)
+- A Supabase project (free tier is enough; you'll wire the project-ref in step 2 of the post-install checklist)
+- A Cloudflare account (only for saas + shop templates; portfolio doesn't need it)
+- A Toss Payments sandbox account (only for saas + shop templates)
+- A Google OAuth client (only needed for saas + portfolio; shop uses Toss-only checkout)
+
+## Quick-start
 
 ```bash
 # SaaS template — recurring billing via Toss billing-key

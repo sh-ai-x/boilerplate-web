@@ -46,7 +46,8 @@
       "step": 4,
       "name": "readme-install-instructions",
       "title": "Root README install instructions for npx create-boilerplate-web",
-      "status": "pending",
+      "status": "completed",
+      "summary": "README.md adds npx install path with all 3 --type copy-paste blocks + Node≥18 requirement, preserves existing Quick-start; AC1-AC6 green",
       "ambiguity_delta": 0.0
     },
     {
