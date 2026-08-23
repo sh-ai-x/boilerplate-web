@@ -1,102 +1,126 @@
 {
-  "schema_version": "1.0.0",
+  "ambiguity_score": 2,
+  "based_on_main_sha": "c72fb63",
+  "build_recovery": {
+    "agent_switch": {
+      "at": "2026-08-23T11:00:00+0900",
+      "env": "DEV_KIT_BUILD_AGENT=codex",
+      "from": "claude",
+      "reason": "runner invoked `claude --workdir <wt>` but installed claude CLI does not recognize --workdir flag",
+      "to": "codex"
+    },
+    "worktree_base_change": {
+      "at": "2026-08-23T11:00:00+0900",
+      "from": "plan/boilerplate-cli-distribution",
+      "reason": "replan branch carries the regenerated step preambles",
+      "to": "plan/1-cli-distribution-replan"
+    }
+  },
+  "created_at": "2026-07-30T00:00:00Z",
+  "evidence_count": 3,
   "phase": "1-cli-distribution",
   "project": "boilerplate-web",
-  "created_at": "2026-07-30T00:00:00Z",
-  "updated_at": "2026-08-23T11:00:00Z",
-  "worktree": "plan/1-cli-distribution-replan",
-  "based_on_main_sha": "c72fb63",
-  "ambiguity_score": 2,
-  "value_score": 125.0,
-  "evidence_count": 3,
-  "totals": {
-    "completed": 3,
-    "blocked": 0,
-    "pending": 3,
-    "completion_pct": 50.0
-  },
+  "schema_version": "1.0.0",
   "steps": [
     {
-      "step": 0,
-      "name": "npm-package-config",
-      "title": "Finalize npm package config (bin, files, publishConfig, name)",
-      "status": "completed",
       "ambiguity_delta": 0.0,
-      "started_at": "2026-08-23T11:06:17+0900",
       "completed_at": "2026-08-23T11:10:27+0900",
-      "duration_seconds": 250.0,
       "delivered_via": {
         "branch": "plan/1-cli-distribution-replan-step0",
         "merge_commit": "5a29649"
       },
+      "duration_seconds": 250.0,
+      "name": "npm-package-config",
       "resets": [
         {
           "at": "2026-08-23T11:00:00+0900",
           "from": "error",
-          "reason": "claude --workdir flag incompatibility; switching runner to codex via DEV_KIT_BUILD_AGENT=codex",
           "previous_error_message": "claude exited 1",
-          "previous_failed_at": "2026-08-23T10:58:27+0900"
+          "previous_failed_at": "2026-08-23T10:58:27+0900",
+          "reason": "claude --workdir flag incompatibility; switching runner to codex via DEV_KIT_BUILD_AGENT=codex"
         }
-      ]
+      ],
+      "started_at": "2026-08-23T11:06:17+0900",
+      "status": "completed",
+      "step": 0,
+      "title": "Finalize npm package config (bin, files, publishConfig, name)"
     },
     {
-      "step": 1,
-      "name": "cli-bundle-build",
-      "title": "Bundle cli/ into dist/cli.js via tsc/esbuild",
-      "status": "completed",
       "ambiguity_delta": 0.0,
-      "started_at": "2026-08-23T11:10:28+0900",
+      "blocked_reason": "Agent sandbox could not reach npm registry (ENOTFOUND); tsc was never installed so dist/cli.js was not produced. Orchestrator manually installed typescript, ran tsc, verified all 6 ACs PASS.",
       "completed_at": "2026-08-23T11:30:00+0900",
-      "duration_seconds": 1162,
       "completed_via": "manual_recovery_in_orchestrator",
-      "blocked_reason": "Agent sandbox could not reach npm registry (ENOTFOUND); tsc was never installed so dist/cli.js was not produced. Orchestrator manually installed typescript, ran tsc, verified all 6 ACs PASS."
-    },
-    {
-      "step": 2,
-      "name": "ci-publish-workflow",
-      "title": ".github/workflows/publish.yml with OIDC trusted publishing",
-      "status": "pending",
-      "ambiguity_delta": 0.0,
-      "historical_note": "publish.yml exists on fix/1-cli-distribution-step2 branch (commit 924aed0) but NOT on main; PR #51 was reverted; this build will regenerate it from the step2.md preamble"
-    },
-    {
-      "step": 3,
-      "name": "e2e-scaffold-test",
-      "title": "CI matrix: end-to-end scaffold test for saas/shop/portfolio",
-      "status": "pending",
-      "ambiguity_delta": 0.0
-    },
-    {
-      "step": 4,
-      "name": "readme-install-instructions",
-      "title": "Root README install instructions for npx create-boilerplate-web",
-      "status": "pending",
-      "ambiguity_delta": 0.0
-    },
-    {
-      "step": 5,
-      "name": "semver-tag-release",
-      "title": "Tag-trigger release flow for v0.x + release guide",
+      "duration_seconds": 1162,
+      "name": "cli-bundle-build",
+      "started_at": "2026-08-23T11:10:28+0900",
       "status": "completed",
+      "step": 1,
+      "title": "Bundle cli/ into dist/cli.js via tsc/esbuild"
+    },
+    {
+      "ambiguity_delta": 0.0,
+      "completed_at": "2026-08-23T11:57:21+0900",
+      "duration_seconds": 202.0,
+      "historical_note": "publish.yml exists on fix/1-cli-distribution-step2 branch (commit 924aed0) but NOT on main; PR #51 was reverted; this build will regenerate it from the step2.md preamble",
+      "name": "ci-publish-workflow",
+      "started_at": "2026-08-23T11:53:59+0900",
+      "status": "completed",
+      "step": 2,
+      "title": ".github/workflows/publish.yml with OIDC trusted publishing"
+    },
+    {
+      "ambiguity_delta": 0.0,
+      "completed_at": "2026-08-23T12:00:08+0900",
+      "duration_seconds": 165.0,
+      "name": "e2e-scaffold-test",
+      "started_at": "2026-08-23T11:57:23+0900",
+      "status": "completed",
+      "step": 3,
+      "title": "CI matrix: end-to-end scaffold test for saas/shop/portfolio"
+    },
+    {
+      "ambiguity_delta": 0.0,
+      "completed_at": "2026-08-23T12:02:27+0900",
+      "duration_seconds": 137.0,
+      "name": "readme-install-instructions",
+      "started_at": "2026-08-23T12:00:10+0900",
+      "status": "completed",
+      "step": 4,
+      "title": "Root README install instructions for npx create-boilerplate-web"
+    },
+    {
       "ambiguity_delta": 0.0,
       "last_update": "2026-07-30T16:17:39Z",
-      "pr": { "number": 49, "merged_at": "2026-08-17T..." }
+      "name": "semver-tag-release",
+      "pr": {
+        "merged_at": "2026-08-17T...",
+        "number": 49
+      },
+      "status": "completed",
+      "step": 5,
+      "title": "Tag-trigger release flow for v0.x + release guide"
     }
   ],
-  "build_recovery": {
-    "agent_switch": {
-      "from": "claude",
-      "to": "codex",
-      "env": "DEV_KIT_BUILD_AGENT=codex",
-      "reason": "runner invoked `claude --workdir <wt>` but installed claude CLI does not recognize --workdir flag",
-      "at": "2026-08-23T11:00:00+0900"
-    },
-    "worktree_base_change": {
-      "from": "plan/boilerplate-cli-distribution",
-      "to": "plan/1-cli-distribution-replan",
-      "reason": "replan branch carries the regenerated step preambles",
-      "at": "2026-08-23T11:00:00+0900"
-    }
+  "totals": {
+    "blocked": 0,
+    "completed": 6,
+    "pending": 0,
+    "completion_pct": 100.0
   },
-  "updated_at": "2026-08-23T11:30:00+0900"
+  "closeout": {
+    "all_steps_completed": true,
+    "completed_at": "2026-08-23T12:02:27+0900",
+    "total_landed_branches": [
+      { "step": 0, "branch": "plan/1-cli-distribution-replan-step0", "commit": "5a29649" },
+      { "step": 1, "branch": "plan/1-cli-distribution-replan-step1", "commits": ["04c088a", "dac1e06"], "note": "manual recovery in orchestrator due to per-step sandbox ENOTFOUND" },
+      { "step": 2, "branch": "plan/1-cli-distribution-replan-step2", "commit": "4ed3736" },
+      { "step": 3, "branch": "plan/1-cli-distribution-replan-step3", "commit": "166ac81" },
+      { "step": 4, "branch": "plan/1-cli-distribution-replan-step4", "commit": "8db8b19" },
+      { "step": 5, "branch": "shipped via PR #49", "merged_at": "2026-08-17T..." }
+    ],
+    "next_stage_trigger": "/dev-kit:review + /dev-kit:security then /dev-kit:ship"
+  },
+  "updated_at": "2026-08-23T11:30:00+0900",
+  "value_score": 125.0,
+  "worktree": "plan/1-cli-distribution-replan"
 }
