@@ -10,18 +10,25 @@
   "value_score": 125.0,
   "evidence_count": 3,
   "totals": {
-    "completed": 1,
-    "blocked": 1,
-    "pending": 4,
-    "completion_pct": 16.67
+    "completed": 3,
+    "blocked": 0,
+    "pending": 3,
+    "completion_pct": 50.0
   },
   "steps": [
     {
       "step": 0,
       "name": "npm-package-config",
       "title": "Finalize npm package config (bin, files, publishConfig, name)",
-      "status": "pending",
+      "status": "completed",
       "ambiguity_delta": 0.0,
+      "started_at": "2026-08-23T11:06:17+0900",
+      "completed_at": "2026-08-23T11:10:27+0900",
+      "duration_seconds": 250.0,
+      "delivered_via": {
+        "branch": "plan/1-cli-distribution-replan-step0",
+        "merge_commit": "5a29649"
+      },
       "resets": [
         {
           "at": "2026-08-23T11:00:00+0900",
