@@ -14,7 +14,7 @@ name: PR Review
 # human gate (REVIEW_REQUIRED / CHANGES_REQUESTED) is what blocks merge.
 #
 # Why `pull_request` (not `pull_request_target`):
-#   `anthropics/claude-code-action@v1` does an OIDC token exchange by
+#   `anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1` does an OIDC token exchange by
 #   default. With `pull_request_target` the exchanged token is rejected
 #   with 401 Invalid OIDC token in any consumer repo that does not have
 #   OIDC trust configured at the org/repo level. `pull_request` issues
@@ -96,7 +96,7 @@ jobs:
       # the dev-harness-kit source is private. Optional for self-install.
       DEV_KIT_GITHUB_TOKEN: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Checkout PR head sha. With `pull_request`, the action defaults
           # to the PR head ref, but we pin the explicit sha so the agent
@@ -170,7 +170,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3[1m]'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
           prompt: |
@@ -207,7 +207,7 @@ jobs:
 
       - name: Run /dev-kit:review via Claude Code opt-in
         if: steps.provider.outputs.provider == 'anthropic'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
@@ -249,7 +249,7 @@ jobs:
             echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # anthropics/claude-code-action@v1 skips when the PR head's
+          # anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 skips when the PR head's
           # .github/workflows/*.yml differs from the default branch.
           workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
             | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
@@ -272,7 +272,7 @@ jobs:
             echo
             echo "LLM review (3-dim) skipped -- workflow validation guard"
             echo
-            echo 'anthropics/claude-code-action@v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
+            echo 'anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
             echo
             echo "Action required: manual review of the workflow changes by a maintainer before merge."
           } | gh pr comment "$PR_NUMBER" --body-file -
@@ -309,64 +309,84 @@ jobs:
           if [ ! -f "$AGENT_OUTPUT" ]; then
             AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
           fi
+          # Issue #625: fetch PR comments for THIS run (filtered by run_id) so
+          # extract-verdict.py can recover the verdict when the MINIMAX
+          # provider drops the assistant stream from the execution file.
+          # The run_id filter defeats #244's stale-comment flap — by
+          # construction only comments posted in THIS run are candidates.
+          COMMENTS_FILE="${{ runner.temp }}/pr-comments-this-run.json"
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number || github.event.inputs.pr_number }}/comments" \
+              --jq ".[] | select(.body | contains(\"run=${{ github.run_id }}\")) | {body: .body}" \
+              > "$COMMENTS_FILE" 2>/dev/null || echo "[]" > "$COMMENTS_FILE"
           file_verdict=""
           if [ -f "$AGENT_OUTPUT" ]; then
-            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || echo '')"
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" "$COMMENTS_FILE" 2>/dev/null || echo '')"
+          else
+            # Execution file genuinely missing — still try the comments
+            # fallback before defaulting.
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" /dev/null "$COMMENTS_FILE" 2>/dev/null || echo '')"
           fi
-          # Issue #625 fallback: when the agent's execution file is missing
-          # the conversation stream (anthropics/claude-code-action@v1 with
-          # provider=minimax drops assistant messages + result.result), the
-          # agent still posts its verdict via `gh pr comment`, which IS
-          # visible to humans. Read the most recent claude-prefixed PR
-          # comment and parse the first `Verdict:` line. This unblocks the
-          # severity gate on the persistent MiniMax-output-file-drop path
-          # without lowering the bar (the comment IS the agent's verdict,
-          # not a default-Approve tolerance).
-          comment_verdict=""
-          if [ -z "$file_verdict" ] || [ "$file_verdict" = "PARSE_FAILED" ]; then
-            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>/dev/null || echo '')"
-          fi
-          # Issue #612 + #625: when file_verdict=PARSE_FAILED, try the
-          # PR-comment fallback BEFORE defaulting to PARSE_FAILED. The
-          # previous if/elif order took the PARSE_FAILED branch first
-          # and never used comment_verdict, defeating the issue #625
-          # fix (PR #49 review finding: "the comment-verdict fallback
-          # is computed but discarded").
-          if [ "$file_verdict" = "PARSE_FAILED" ] && [ -n "$comment_verdict" ]; then
-            echo "::notice::verdict recovered from PR comment despite file PARSE_FAILED (issue #625 fallback took priority over issue #612 sentinel)"
-            verdict="$comment_verdict"
-            verdict_source="agent-pr-comment-fallback"
-            agent_ran="true"
-          elif [ "$file_verdict" = "PARSE_FAILED" ]; then
-            # Issue #612 sentinel.
-            echo "::warning::review verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line, no claude-prefixed comment with verdict); gate will hard-fail with parse-failed-no-verdict remediation"
+          # Track which path produced the verdict for the audit comment.
+          # file-only path → agent-output-file; comments fallback → agent-pr-comment.
+          comment_fallback_used="false"
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            # Issue #612 fix: extract-verdict.py saw the file existed
+            # with parseable content but no recognizable `Verdict:`
+            # line — the agent ran but did not follow the verdict
+            # contract. Thread the PARSE_FAILED sentinel through to
+            # the gate so it hard-fails with the dedicated remediation
+            # message (see the gate's PARSE_FAILED branch) instead of
+            # silently defaulting to Approve (the old consumer-facing
+            # bug). The audit comment's source field now records
+            # `parse-failed-no-verdict` so the reviewer can see the
+            # actual failure mode without re-reading the gate logs.
+            #
+            # Issue #625 exception: when MINIMAX is the provider, the
+            # execution file lacks assistant messages even though the
+            # agent DID post a verdict as a PR comment. extract-verdict.py
+            # tried the comments fallback internally — if it found a
+            # verdict there, file_verdict is no longer PARSE_FAILED.
+            # If we got here with PARSE_FAILED still set, the comments
+            # fallback ALSO didn't find a verdict, so the original
+            # #612 hard-fail logic still applies.
+            echo "::warning::review verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
             verdict="PARSE_FAILED"
             verdict_source="parse-failed-no-verdict"
             agent_ran="true"
           elif [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
-            verdict_source="agent-output-file"
-            agent_ran="true"
-          elif [ -n "$comment_verdict" ]; then
-            echo "::notice::verdict recovered from PR comment (issue #625 fallback; agent execution file was empty)"
-            verdict="$comment_verdict"
-            verdict_source="agent-pr-comment-fallback"
+            # The PR-comments fallback is engaged when the execution
+            # file was missing / unreadable / HTML / PARSE_FAILED — the
+            # script's contract is "file verdict wins when present;
+            # fall through to comments otherwise". Infer which path
+            # produced this verdict from the AGENT_OUTPUT state.
+            if [ ! -f "$AGENT_OUTPUT" ]; then
+              verdict_source="agent-pr-comment"
+              comment_fallback_used="true"
+            else
+              verdict_source="agent-output-file"
+            fi
             agent_ran="true"
           else
             # Genuine no-file path: extract-verdict.py returned empty
             # because the file is missing / HTML / unreadable /
-            # suspiciously small. Tolerance is appropriate for these
-            # transient filesystem / network cases — the gate's
-            # existing contract treats empty as "I couldn't read the
-            # file" rather than "the agent ran but produced no
-            # verdict" (that case now flows through the PARSE_FAILED
-            # arm above).
+            # suspiciously small AND the comments fallback also found
+            # nothing. Tolerance is appropriate for these transient
+            # filesystem / network cases — the gate's existing
+            # contract treats empty as "I couldn't read the file"
+            # rather than "the agent ran but produced no verdict"
+            # (that case now flows through the PARSE_FAILED arm above).
             case "${{ job.status }}" in
               cancelled|failure)
-                echo "::warning::review verdict missing (job.status=${{ job.status }}, transient); defaulting to Approve"
-                verdict="Approve"
-                verdict_source="default-approve-job-${{ job.status }}"
-                agent_ran="true"
+                # Issue #638: cancelled/failed upstream agent is NOT
+                # default-Approve. agent_ran=false routes through the
+                # gate's "AI agent was skipped" hard-fail branch (gate
+                # L812-861); the empty-file `*)` arm below keeps its
+                # existing tolerance (file genuinely missing).
+                echo "::warning::review verdict missing (job.status=${{ job.status }}, transient); gate will hard-fail via agent_ran=false"
+                verdict=""
+                verdict_source="default-no-verdict-job-${{ job.status }}"
+                agent_ran="false"
                 ;;
               *)
                 echo "::warning::review verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
@@ -376,49 +396,38 @@ jobs:
                 ;;
             esac
           fi
+          # Issue #625 comment-derived fallback: only attempts when
+          # extract-verdict.py returned PARSE_FAILED (e.g. provider=minimax
+          # wrapper-format envelope). The cutoff filter on createdAt avoids
+          # resurrecting stale verdicts from previous pushes (issue #244
+          # root-cause). When no comment matches, the PARSE_FAILED sentinel
+          # stands and the gate hard-fails with the remediation message.
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            CUTOFF="${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}"
+            # Issue #625 retry-loop: claude-code-action posts the agent's
+            # verdict PR comment ASYNCHRONOUSLY after the agent-run step
+            # completes -- there is a ~30s race window in which this
+            # extract step ran but the agent's claude[bot] PR comment isn't
+            # yet visible. A single-shot lookup misses in that window and
+            # the gate hard-fails on what is actually a clean review.
+            # 6 attempts x 5s sleep (30s total budget, spans the full ~30s
+            # race window) closes the gap without burning CI minutes.
+            # The retry-loop is delegated to _verdict_comments_fallback.sh
+            # so the review + security jobs share a single SSOT (the
+            # pre-F1 fix copy-pasted this 25-line block into both jobs).
+            comment_verdict=$(CUTOFF="$CUTOFF" JOB_NAME=review WORKSPACE="${{ github.workspace }}" "${{ github.workspace }}/.github/workflows/_verdict_comments_fallback.sh" "$PR_NUMBER")
+            if [ -n "$comment_verdict" ]; then
+              verdict="$comment_verdict"
+              verdict_source="comments-fallback"
+              agent_ran="true"
+            fi
+          fi
           echo "review_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
           echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
           echo "verdict_source=${verdict_source}" >> "$GITHUB_OUTPUT"
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
           audit_body="<!-- dev-kit-verdict-audit --> run=${{ github.run_id }} job=review status=${{ job.status }} verdict=${verdict:-MISSING} source=${verdict_source:-unknown}"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
-
-      # ROOT-CAUSE FIX (boilerplate-web PR #49 repro): when the LLM agent
-      # ran but its output file lacked a parseable "Verdict:" line (model
-      # didn't follow the formatting instruction), the extract step
-      # defaulted to Approve but no comment was ever posted on the PR —
-      # the operator couldn't see the review verdict. The workflow's only
-      # comment-posting step (Post fallback verdict comment) only runs in
-      # the workflow-validation skip path, so the normal-path case left
-      # the PR with zero LLM comments.
-      #
-      # Now: after extracting the verdict, ALWAYS post a single comment
-      # with the verdict line + provenance metadata. Skip when the
-      # fallback path already posted (avoids duplicating that comment).
-      # The agent may have also posted its own detailed comment — having
-      # both is fine; the gate's regex parses "Verdict: <value>" from
-      # either.
-      - name: Post verdict comment (review)
-        if: always() && steps.fallback.outputs.needs_fallback != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          VERDICT: ${{ steps.extract_verdict.outputs.verdict }}
-          AGENT_RAN: ${{ steps.extract_verdict.outputs.agent_ran }}
-        run: |
-          verdict="${VERDICT:-Approve}"
-          agent_ran="${AGENT_RAN:-false}"
-          {
-            echo "Verdict: ${verdict}"
-            echo
-            if [ "${agent_ran}" = "true" ]; then
-              echo "Source: agent ran; verdict extracted from claude-execution-output.json (see workflow run for full transcript)."
-            else
-              echo "Source: agent did not run; verdict defaulted to Approve (workflow-validation guard or job cancellation)."
-            fi
-            echo
-            echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          } | gh pr comment "$PR_NUMBER" --body-file -
 
   security:
     # See review-job comment above; same fork-safety contract.
@@ -441,7 +450,7 @@ jobs:
       MINIMAX_BASE_URL: https://api.minimax.io/anthropic
       DEV_KIT_GITHUB_TOKEN: ${{ secrets.DEV_KIT_GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Checkout PR head sha. With `pull_request`, the action defaults
           # to the PR head ref, but we pin the explicit sha so the agent
@@ -514,7 +523,7 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_OPUS_MODEL: 'MiniMax-M3[1m]'
           ANTHROPIC_DEFAULT_HAIKU_MODEL: 'MiniMax-M3[1m]'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
           prompt: |
@@ -550,7 +559,7 @@ jobs:
 
       - name: Run /dev-kit:security via Claude Code opt-in
         if: steps.provider.outputs.provider == 'anthropic'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           track_progress: false  # force per-line inline comments (track_progress: true suppresses them)
@@ -592,7 +601,7 @@ jobs:
             echo "needs_fallback=false (workflow_dispatch)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # anthropics/claude-code-action@v1 skips when the PR head's
+          # anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 skips when the PR head's
           # .github/workflows/*.yml differs from the default branch.
           workflow_files=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null \
             | grep -E '^\.github/workflows/.+\.ya?ml$' || true)
@@ -615,7 +624,7 @@ jobs:
             echo
             echo "LLM security (10-dim OWASP) skipped -- workflow validation guard"
             echo
-            echo 'anthropics/claude-code-action@v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
+            echo 'anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 refused to run because this PR modifies one or more files under .github/workflows/. The action enforces identical content with the default branch as a self-protection guard.'
             echo
             echo "Action required: manual review of the workflow changes by a maintainer before merge."
           } | gh pr comment "$PR_NUMBER" --body-file -
@@ -644,54 +653,59 @@ jobs:
           if [ ! -f "$AGENT_OUTPUT" ]; then
             AGENT_OUTPUT="/home/runner/work/_temp/claude-execution-output.json"
           fi
+          # Issue #625: same comment-fallback fetch as the review job — see
+          # that step for the rationale (MINIMAX provider drops the
+          # assistant stream; recover from PR comments filtered by run_id).
+          COMMENTS_FILE="${{ runner.temp }}/pr-comments-this-run.json"
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number || github.event.inputs.pr_number }}/comments" \
+              --jq ".[] | select(.body | contains(\"run=${{ github.run_id }}\")) | {body: .body}" \
+              > "$COMMENTS_FILE" 2>/dev/null || echo "[]" > "$COMMENTS_FILE"
           file_verdict=""
           if [ -f "$AGENT_OUTPUT" ]; then
-            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" 2>/dev/null || true)"
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" "$AGENT_OUTPUT" "$COMMENTS_FILE" 2>/dev/null || true)"
+          else
+            file_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict.py" /dev/null "$COMMENTS_FILE" 2>/dev/null || true)"
           fi
-          # Issue #625 fallback (symmetric with the review extract step):
-          # when anthropics/claude-code-action@v1 with provider=minimax
-          # drops the conversation stream from the execution file, the
-          # agent still posts its verdict via `gh pr comment`. Read the
-          # most recent claude-prefixed PR comment and parse the first
-          # `Verdict:` line.
-          comment_verdict=""
-          if [ -z "$file_verdict" ] || [ "$file_verdict" = "PARSE_FAILED" ]; then
-            comment_verdict="$(python3 "${{ github.workspace }}/scripts/extract-verdict-from-comment.py" "$PR_NUMBER" 2>/dev/null || echo '')"
-          fi
-          # Issue #612 + #625 (symmetric with the review job): try
-          # the PR-comment fallback BEFORE defaulting to PARSE_FAILED.
-          if [ "$file_verdict" = "PARSE_FAILED" ] && [ -n "$comment_verdict" ]; then
-            echo "::notice::security verdict recovered from PR comment despite file PARSE_FAILED (issue #625 fallback took priority over issue #612 sentinel)"
-            verdict="$comment_verdict"
-            verdict_source="agent-pr-comment-fallback"
-            agent_ran="true"
-          elif [ "$file_verdict" = "PARSE_FAILED" ]; then
-            # Issue #612 sentinel.
-            echo "::warning::security verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line, no claude-prefixed comment with verdict); gate will hard-fail with parse-failed-no-verdict remediation"
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            # Issue #612 fix (symmetric with the review job): the agent
+            # ran (file exists, JSONL parseable) but did not emit a
+            # recognizable `Verdict:` line. Thread the PARSE_FAILED
+            # sentinel through to the gate so it hard-fails with the
+            # dedicated remediation message instead of silently
+            # defaulting to Approve (the old consumer-facing bug).
+            #
+            # Issue #625 exception: see review-job comment for the
+            # MINIMAX-fallback rationale.
+            echo "::warning::security verdict missing (file=${AGENT_OUTPUT} produced no parseable 'Verdict:' line); gate will hard-fail with parse-failed-no-verdict remediation"
             verdict="PARSE_FAILED"
             verdict_source="parse-failed-no-verdict"
             agent_ran="true"
           elif [ -n "$file_verdict" ]; then
             verdict="$file_verdict"
-            verdict_source="agent-output-file"
-            agent_ran="true"
-          elif [ -n "$comment_verdict" ]; then
-            echo "::notice::security verdict recovered from PR comment (issue #625 fallback; agent execution file was empty)"
-            verdict="$comment_verdict"
-            verdict_source="agent-pr-comment-fallback"
+            if [ ! -f "$AGENT_OUTPUT" ]; then
+              verdict_source="agent-pr-comment"
+            else
+              verdict_source="agent-output-file"
+            fi
             agent_ran="true"
           else
             # Genuine no-file path: extract-verdict.py returned empty
             # because the file is missing / HTML / unreadable /
-            # suspiciously small. Tolerance is appropriate for these
-            # transient filesystem / network cases — see the
-            # review-job comment above for the full rationale.
+            # suspiciously small AND the comments fallback also found
+            # nothing. Tolerance is appropriate for these transient
+            # filesystem / network cases — see the review-job comment
+            # above for the full rationale.
             case "${{ job.status }}" in
               cancelled|failure)
-                echo "::warning::security verdict missing (job.status=${{ job.status }}, transient); defaulting to Approve"
-                verdict="Approve"
-                verdict_source="default-approve-job-${{ job.status }}"
-                agent_ran="true"
+                # Issue #638 fix (symmetric with the review job above):
+                # a cancelled or failed upstream agent MUST be treated
+                # as agent_ran=false so the severity gate's "AI agent
+                # was skipped" hard-fail branch fires. Do NOT default-
+                # Approve on a missed upstream run.
+                echo "::warning::security verdict missing (job.status=${{ job.status }}, transient); gate will hard-fail via agent_ran=false"
+                verdict=""
+                verdict_source="default-no-verdict-job-${{ job.status }}"
+                agent_ran="false"
                 ;;
               *)
                 echo "::warning::security verdict missing (no agent output file at ${AGENT_OUTPUT}); defaulting to Approve"
@@ -701,41 +715,28 @@ jobs:
                 ;;
             esac
           fi
+          # Issue #625 comment-derived fallback: symmetric with the review
+          # job — when extract-verdict.py returned PARSE_FAILED, attempt
+          # to recover the verdict from the most recent claude-prefixed
+          # PR comment. Cutoff filter avoids stale verdicts (issue #244).
+          if [ "$file_verdict" = "PARSE_FAILED" ]; then
+            CUTOFF="${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}"
+            # Issue #625 retry-loop — delegated to _verdict_comments_fallback.sh
+            # so the review + security jobs share a single SSOT (the pre-F1
+            # fix copy-pasted this 25-line block into both jobs).
+            comment_verdict=$(CUTOFF="$CUTOFF" JOB_NAME=security WORKSPACE="${{ github.workspace }}" "${{ github.workspace }}/.github/workflows/_verdict_comments_fallback.sh" "$PR_NUMBER")
+            if [ -n "$comment_verdict" ]; then
+              verdict="$comment_verdict"
+              verdict_source="comments-fallback"
+              agent_ran="true"
+            fi
+          fi
           echo "security_verdict=${verdict}  source=${verdict_source}  agent_ran=${agent_ran}"
           echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
           echo "verdict_source=${verdict_source}" >> "$GITHUB_OUTPUT"
           echo "agent_ran=${agent_ran}" >> "$GITHUB_OUTPUT"
           audit_body="<!-- dev-kit-verdict-audit --> run=${{ github.run_id }} job=security status=${{ job.status }} verdict=${verdict:-MISSING} source=${verdict_source:-unknown}"
           gh pr comment "$PR_NUMBER" --body "$audit_body"
-
-      # ROOT-CAUSE FIX (boilerplate-web PR #49 repro): see /dev-kit:review
-      # sibling step above for full context. Same rationale: the
-      # workflow's only comment-posting path (Post fallback verdict
-      # comment) only ran in the workflow-validation skip case, leaving
-      # normal-path runs with no PR comment when the agent's output file
-      # lacked a parseable "Verdict:" line. Now post a verdict comment
-      # unconditionally (skipping the bootstrap-PR fallback path).
-      - name: Post verdict comment (security)
-        if: always() && steps.fallback.outputs.needs_fallback != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          VERDICT: ${{ steps.extract_verdict.outputs.verdict }}
-          AGENT_RAN: ${{ steps.extract_verdict.outputs.agent_ran }}
-        run: |
-          verdict="${VERDICT:-Approve}"
-          agent_ran="${AGENT_RAN:-false}"
-          {
-            echo "Verdict: ${verdict}"
-            echo
-            if [ "${agent_ran}" = "true" ]; then
-              echo "Source: agent ran; verdict extracted from claude-execution-output.json (see workflow run for full transcript)."
-            else
-              echo "Source: agent did not run; verdict defaulted to Approve (workflow-validation guard or job cancellation)."
-            fi
-            echo
-            echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          } | gh pr comment "$PR_NUMBER" --body-file -
 
   gate:
     # Severity gate: same fork-safety guard. Pull from job outputs --
@@ -758,7 +759,7 @@ jobs:
       EVENT_NAME: ${{ github.event_name }}
     steps:
       - name: Checkout (for gh CLI git discovery)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
@@ -769,23 +770,18 @@ jobs:
           # This is robust: no fragile comment-body matching required.
           R="${{ needs.review.outputs.verdict }}"
           S="${{ needs.security.outputs.verdict }}"
-          # agent_ran: false when anthropics/claude-code-action@v1 SKIPPED
+          # agent_ran: false when anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 SKIPPED
           # the run due to workflow-validation. Set by the 'Extract <skill>
           # verdict' post-step based on whether any claude-prefixed comment
           # exists on the PR. The action skips silently on PRs that touch
           # .github/workflows/* (and on bootstrap-PRs that add the file).
           R_AGENT="${{ needs.review.outputs.agent_ran }}"
           S_AGENT="${{ needs.security.outputs.agent_ran }}"
-          # verdict_source: provenance tag emitted by the 'Extract <skill>
-          # verdict' step. The bootstrap-PR fallback path sets this to
-          # 'needs-fallback-bootstrap-pr' when the action's anti-recursion
-          # guard skipped the agent because the PR modifies
-          # .github/workflows/*. Other sources: 'agent-output-file',
-          # 'agent-pr-comment-fallback', 'parse-failed-no-verdict',
-          # 'default-approve-job-failure|cancelled',
-          # 'default-approve-no-file'. Read it here so the gate can
-          # distinguish the documented bootstrap case (skip is by design)
-          # from real install-broken cases (skip is a bug).
+          # verdict_source: classifier that produced the verdict (issue #625).
+          # Used by the agent_ran=false arm to pick the correct remediation
+          # text: 'needs-fallback-bootstrap-pr' (PR touches a workflow file
+          # so the action skipped) vs 'default-approve-no-file' (action ran
+          # but produced no execution file -- distinct failure mode).
           R_SOURCE="${{ needs.review.outputs.verdict_source }}"
           S_SOURCE="${{ needs.security.outputs.verdict_source }}"
           # Job-level results: success | failure | cancelled | skipped.
@@ -798,10 +794,10 @@ jobs:
           R_RESULT="${{ needs.review.result }}"
           S_RESULT="${{ needs.security.result }}"
           EVENT="$EVENT_NAME"
-          echo "review=$R (result=$R_RESULT, agent_ran=$R_AGENT, source=$R_SOURCE)"
-          echo "security=$S (result=$S_RESULT, agent_ran=$S_AGENT, source=$S_SOURCE)"
+          echo "review=$R (result=$R_RESULT, agent_ran=$R_AGENT)"
+          echo "security=$S (result=$S_RESULT, agent_ran=$S_AGENT)"
 
-          # Issue #212-C1-fix: anthropics/claude-code-action@v1 exits 0 with
+          # Issue #212-C1-fix: anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 exits 0 with
           # a "workflow validation skip" warning when the PR's head differs
           # from the default branch under .github/workflows/*. Result is
           # "success" (the action's exit-0 mask), but the agent never ran —
@@ -810,46 +806,91 @@ jobs:
           # silent pass (the bootstrap-PR / PR-modifies-workflow scenario).
           # Hard-fail with a remediation message so the user knows to merge
           # the workflow change first and re-push from a clean branch.
+          # Issue #625: split the agent_ran=false remediation text by
+          # verdict_source. The bootstrap-PR text below only applies when
+          # the workflow-validation guard actually skipped the action
+          # (verdict_source=needs-fallback-bootstrap-pr). On PRs that do
+          # NOT touch .github/workflows/* but still see agent_ran=false
+          # (e.g. provider=minimax returns no execution file -- the parser
+          # defaults to default-approve-no-file), print a generic "no
+          # execution file" remediation pointing at the action logs /
+          # provider switch instead of the misleading workflow-merge
+          # message.
+          #
+          # Backward-compat: when R_SOURCE / S_SOURCE is empty (older
+          # extract-verdict versions that did not emit a source label, or
+          # future call sites that forget to set it), default to the
+          # bootstrap arm so existing tests / workflows still behave
+          # like before this split. The new "no execution file" arm
+          # fires only when the source is explicitly set to a non-
+          # bootstrap value (default-approve-no-file, parse-failed-no-
+          # verdict, etc.).
           if [ "$R_AGENT" = "false" ] || [ "$S_AGENT" = "false" ]; then
-            # Bootstrap-PR exception: when BOTH upstream jobs report
-            # agent_ran=false AND verdict_source=needs-fallback-bootstrap-pr,
-            # the action's anti-recursion guard refused to run because this
-            # PR modifies .github/workflows/*. The fallback path inside each
-            # job already posted a synthetic 'Verdict: Approve' comment +
-            # tagged its provenance as needs-fallback-bootstrap-pr; this is
-            # the documented bootstrap recovery contract, not an install
-            # bug. Tolerate it: pass through the synthesized Approve so the
-            # human gate (REVIEW_REQUIRED / CHANGES_REQUESTED) is what
-            # actually blocks merge, not a missing LLM review that the
-            # action structurally cannot provide on a workflow-modifying PR.
-            #
-            # Distinct from issue #212-C1 install-broken signature (which
-            # has agent_ran=false but verdict_source ∈ {default-approve-*,
-            # parse-failed-no-verdict, ''}): those still hard-fail below
-            # because the action COULD have run and didn't for an
-            # environment reason, not a workflow-shape reason.
-            if { [ "$R_AGENT" = "false" ] && [ "$R_SOURCE" = "needs-fallback-bootstrap-pr" ]; } \
-               && { [ "$S_AGENT" = "false" ] && [ "$S_SOURCE" = "needs-fallback-bootstrap-pr" ]; }; then
+            # Bootstrap-PR exception (PR #62): when the workflow-validation
+            # guard refused to run because this PR modifies .github/workflows/*,
+            # the per-job Extract step emitted verdict=Approve with
+            # verdict_source=needs-fallback-bootstrap-pr and agent_ran=false.
+            # Tolerate it: fall through to the rank/case logic below where
+            # worst=Approve will exit 0. The human gate (REVIEW_REQUIRED /
+            # CHANGES_REQUESTED on the PR) is what actually blocks merge,
+            # not a single missing LLM verdict the action structurally
+            # cannot provide on a workflow-modifying PR. Distinct from the
+            # install-broken / no-execution-file signatures (issue #212-C1)
+            # handled in the else branches below.
+            if [ "$R_SOURCE" = "needs-fallback-bootstrap-pr" ] || [ "$S_SOURCE" = "needs-fallback-bootstrap-pr" ]; then
               echo "::notice::bootstrap-PR fallback: both review+security agents skipped due to anthropics/claude-code-action@v1's workflow-validation guard (PR modifies .github/workflows/*). Accepting synthesized Approve; human gate decides merge."
-              # Fall through to the rank/case logic below — R='Approve'
-              # and S='Approve' from the fallback path will pass cleanly.
-            else
+              # Fall through to the rank/case logic below — R='Approve' and
+              # S='Approve' from the fallback path will pass cleanly.
+            elif [ -z "$R_SOURCE$S_SOURCE" ]; then
+              # Backward-compat: older extract-verdict versions / future call
+              # sites that did not emit a source label. Keep the pre-split
+              # hard-fail so install-broken signatures are not silently
+              # tolerated by an empty source.
               {
-                echo "::error::review+security gate: AI agent was skipped (non-bootstrap)"
-                echo "  review.agent_ran=$R_AGENT verdict=$R source=$R_SOURCE"
-                echo "  security.agent_ran=$S_AGENT verdict=$S source=$S_SOURCE"
+                echo "::error::review+security gate: AI agent was skipped (no verdict_source label)"
+                echo "  review.agent_ran=$R_AGENT verdict=$R source=(empty)"
+                echo "  security.agent_ran=$S_AGENT verdict=$S source=(empty)"
                 echo
                 echo "  anthropics/claude-code-action@v1 refused to run, but the"
                 echo "  skip is NOT the documented bootstrap-PR case (verdict_source"
-                echo "  is not 'needs-fallback-bootstrap-pr' on both sides). Most"
-                echo "  often this is the issue #212-C1 install-broken signature:"
+                echo "  is empty on both sides — older extract-verdict version or"
+                echo "  missing source label). Most often this is the issue #212-C1"
+                echo "  install-broken signature:"
                 echo "    - DEV_KIT_GITHUB_TOKEN secret missing or expired"
                 echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY missing"
                 echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
                 echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
                 echo
-                echo "  The gate does NOT default to Approve here — that would mask"
-                echo "  install bugs. Fix the upstream failure and re-push."
+                echo "  Fix:"
+                echo "    1. Update extract-verdict.py to emit a non-empty verdict_source."
+                echo "    2. Inspect the 'Run anthropics/claude-code-action' step logs."
+              } >&2
+              exit 1
+            else
+              {
+                echo "::error::review+security gate: AI agent produced no execution file"
+                echo "  review.agent_ran=$R_AGENT verdict=$R source=$R_SOURCE"
+                echo "  security.agent_ran=$S_AGENT verdict=$S source=$S_SOURCE"
+                echo
+                echo "  anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 exited 0 but did not produce"
+                echo "  a claude-execution-output.json at the expected path."
+                echo "  This is NOT the workflow-validation skip (the PR does"
+                echo "  not touch .github/workflows/*); the action ran but"
+                echo "  its output envelope was empty or unreadable."
+                echo
+                echo "  Common causes:"
+                echo "    - provider=minimax occasionally returns no execution"
+                echo "      file when the conversation stream is missing (see"
+                echo "      issue #625). Consider switching CI_REVIEW_PROVIDER"
+                echo "      to 'anthropic' for this PR."
+                echo "    - action rate-limit masked by exit-0"
+                echo "    - transient filesystem / network error"
+                echo
+                echo "  Fix:"
+                echo "    - Inspect the 'Run anthropics/claude-code-action' step"
+                echo "      logs in the GH Actions run for the actual reason."
+                echo "    - If the failure mode is recurring for provider=minimax,"
+                echo "      set CI_REVIEW_PROVIDER=anthropic via 'gh variable set'."
               } >&2
               exit 1
             fi
@@ -869,7 +910,7 @@ jobs:
               echo "    - DEV_KIT_GITHUB_TOKEN secret missing or expired"
               echo "    - MINIMAX_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY missing"
               echo "    - dev-kit plugin install failed (see 'Install dev-kit plugin' step)"
-              echo "    - anthropics/claude-code-action@v1 rate-limit / transient network error"
+              echo "    - anthropics/claude-code-action@558b1d6cab4085c7753fe402c10bef0fbb92ac7a # v1 rate-limit / transient network error"
               echo
               echo "  The severity gate does NOT default to Approve on failure"
               echo "  (that would mask install bugs -- issue #212-C1)."
