@@ -7,7 +7,7 @@ const readline = require('readline');
 const { parseArgs, USAGE } = require('./lib/parse-args');
 const { validateType, downloadTemplate } = require('./lib/target-download');
 const { rewritePackageName } = require('./lib/rewrite');
-const { formatPostInstallChecklist } = require('./lib/post-install');
+const { formatPostInstallChecklist, formatDeploySecretHints } = require('./lib/post-install');
 const { assertSafeTarget, revalidateBeforeWrite } = require('./lib/path-safety');
 const { installDeps } = require('./lib/install-deps');
 const { runPipeline } = require('./lib/pipeline');
@@ -35,6 +35,7 @@ async function main() {
     force,
     allowUnsafePath,
     skipInstall,
+    deploy,
     deprecation,
   } = parseArgs(process.argv);
 
@@ -53,7 +54,7 @@ async function main() {
     process.exit(1);
   }
 
-  // Emit deprecation warning for the legacy `--force` alias (M2 — A06).
+  // Emit deprecation warning for the legacy `--force` alias (M2 - A06).
   // `force` is now a derived flag (parsed into overwrite + allowUnsafePath
   // by parseArgs); we surface the deprecation here so the user sees it
   // exactly once per invocation, before any prompts.
@@ -90,7 +91,7 @@ async function main() {
   await runPipeline(safeTarget, cleanupOpts, [
     // --overwrite enables degit force:true. --allow-unsafe-path only
     // bypasses CWD safety (and is required when the target is out-of-CWD
-    // — e.g. the CI e2e scaffold test uses /tmp/cbw-test-<type>).
+    // - e.g. the CI e2e scaffold test uses /tmp/cbw-test-<type>).
     async () => {
       await downloadTemplate(type, safeTarget, { force: overwrite });
     },
@@ -101,7 +102,7 @@ async function main() {
     ...(skipInstall
       ? [
           // m7 (A06): when --skip-install is set, the full checklist still
-          // applies once the user installs deps manually — print a one-
+          // applies once the user installs deps manually - print a one-
           // liner pointing at it instead of dropping it on the floor.
           async () => {
             process.stdout.write(
@@ -118,6 +119,14 @@ async function main() {
           async () => {
             const checklist = formatPostInstallChecklist(type);
             if (checklist) process.stdout.write(checklist);
+            // --deploy: print a copy-paste-ready `gh secret set` block for the
+            // 7 deploy secrets. Library-pure print - the CLI never calls `gh`
+            // itself, never reads stdin; the operator pastes the block into
+            // their terminal after substituting real `$VAR` values.
+            if (deploy) {
+              const hint = formatDeploySecretHints(/* repo */ null);
+              if (hint) process.stdout.write(hint);
+            }
           },
         ]),
   ]);
@@ -127,7 +136,7 @@ async function main() {
  * Confirm before clobbering a non-empty target.
  *
  * SAFETY (M1): --yes alone skips the prompt. But --yes + --overwrite
- * combined is a destructive intent (existing dir + will overwrite) — we
+ * combined is a destructive intent (existing dir + will overwrite) - we
  * require a typed "delete" confirmation in that combination. The user
  * can pass --force to bypass all confirmation, including the TTY gate.
  */
