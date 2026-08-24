@@ -36,6 +36,7 @@ async function main() {
     allowUnsafePath,
     skipInstall,
     deploy,
+    openSetupGuide,
     deprecation,
   } = parseArgs(process.argv);
 

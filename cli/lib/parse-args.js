@@ -1,6 +1,6 @@
 'use strict';
 
-const USAGE = `Usage: create-boilerplate-web <targetFolder> --type=<saas|shop|portfolio> [--overwrite] [--yes] [--allow-unsafe-path] [--force (deprecated alias)] [--allow-scripts] [--skip-install] [--deploy]`;
+const USAGE = `Usage: create-boilerplate-web <targetFolder> --type=<saas|shop|portfolio> [--overwrite] [--yes] [--allow-unsafe-path] [--force (deprecated alias)] [--allow-scripts] [--skip-install] [--deploy] [--deploy] [--open-setup-guide]`;
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -13,6 +13,7 @@ function parseArgs(argv) {
   let allowUnsafePath = false;
   let skipInstall = false;
   let deploy = false;
+  let openSetupGuide = false;
 
   for (const arg of args.slice(1)) {
     if (arg.startsWith('--type=')) {
@@ -83,6 +84,7 @@ function parseArgs(argv) {
     allowUnsafePath,
     skipInstall,
     deploy,
+    openSetupGuide,
     deprecation,
   };
 }
