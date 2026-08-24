@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0.0",
+  "phase": "2-deploy-automation",
+  "project": "boilerplate-web",
+  "created_at": "2026-08-24T00:00:00Z",
+  "updated_at": "2026-08-24T00:00:00Z",
+  "worktree": "feat/deploy-automation-step0",
+  "based_on_main_sha": "0e4c149",
+  "totals": {
+    "completed": 4,
+    "blocked": 0,
+    "pending": 0,
+    "completion_pct": 100
+  },
+  "steps": [
+    {
+      "step": 0,
+      "name": "deploy-secrets-ssot",
+      "title": "docs/DEPLOY_SECRETS.md — single source of truth for the 7 GitHub repo secrets",
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "branch": "feat/deploy-automation-step0",
+      "build_sha": "PENDING",
+      "summary": "AC1-AC3 PASS locally: docs/DEPLOY_SECRETS.md exists with 7 canonical secrets (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID, CF_API_TOKEN, CF_ZONE_ID, SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF). tests/test_deploy_secrets_doc.py: 6 tests passed."
+    },
+    {
+      "step": 1,
+      "name": "per-template-deploy-workflows",
+      "title": "templates/_shared/.github/workflows/deploy-shared.yml + 3 per-template deploy.yml files",
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "branch": "feat/deploy-automation-step0",
+      "build_sha": "PENDING",
+      "summary": "AC1-AC4 PASS locally: all 4 workflow files present (composite + saas + shop + portfolio). 24 tests passed across presence/SHA-pinned/secrets contracts. Third-party Actions SHA-pinned (amondnet/vercel-action@16e87c0, cloudflare/pages-action@df66923, supabase/setup-cli@aa3515e)."
+    },
+    {
+      "step": 2,
+      "name": "cli-checklist-and-deploy-flag",
+      "title": "cli/lib/post-install.js checklist rewrite + --deploy flag in parseArgs + gh secret set hints",
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "branch": "feat/deploy-automation-step0",
+      "build_sha": "PENDING",
+      "summary": "AC1-AC4 PASS locally: all 3 CHECKLISTS now include the gh secret set line + push-to-main deploy trigger line. tests/cli.test.js:50 (post-install checklist type-aware) still PASSES (regression safety). --deploy flag parses + defaults correctly. 12 new tests + 1 formatDeploySecretHints() library helper for the printable hints."
+    },
+    {
+      "step": 3,
+      "name": "per-template-deploy-docs",
+      "title": "templates/{saas,shop,portfolio}/DEPLOY.md operator runbooks",
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "branch": "feat/deploy-automation-step0",
+      "build_sha": "PENDING",
+      "summary": "AC1-AC4 PASS locally: all 3 DEPLOY.md files present with required sections (Before first push + After first push). saas + shop reference their Edge Function names (billing, toss-pay); portfolio explicitly disclaims Edge Functions + WAF. 14 tests passed."
+    }
+  ],
+  "closeout": {
+    "all_steps_completed": true,
+    "completion_pct": 100,
+    "totals_tests_passed": 56,
+    "totals_files_added": 16,
+    "totals_files_modified": 4,
+    "iron_laws_compliance": {
+      "L1_verification_artifact": "Each step adds 1+ pytest files with assertions; pre-existing tests/cli.test.js:50 still passes.",
+      "L3_quoted_exit_codes": "All AC steps ran with exit code 0; pytest produced `56 passed in 0.20s`.",
+      "L4_zero_deferred_markers": "Plan covers the full deploy path end-to-end; zero deferred-work markers in any added file (Iron Law #4 compliance).",
+      "L5_one_answer": "Single approach (per-template .github/workflows/deploy.yml + CLI checklist rewrite) locked in."
+    },
+    "risks": [
+      "Deploy workflows reference third-party Actions by SHA at PR-open time. If `amondnet/vercel-action`, `cloudflare/pages-action`, or `supabase/setup-cli` upstream gets force-pushed, the next phase-2 PR must re-resolve the SHA.",
+      "The cloudflare-waf job's `jq` wrap into the v4 ruleset envelope assumes `cloudflare-rules.json` stays a top-level JSON array. If the SSOT shape changes (e.g. to a `{ rules: [...] }` object directly), the wrap function must change too.",
+      "`gh secret set --repo OWNER/REPO` requires the operator to be authenticated to GitHub and to OWNER/REPO. The --deploy hint prints the literal `OWNER/REPO` token; operators must substitute the real repo before pasting."
+    ]
+  }
+}
