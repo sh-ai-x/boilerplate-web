@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "ref": "e46f51d",
+  "ref": "a98ea7c923d191ae1447b8e02e8ef27ad1920d8e",
   "source": "github:sanghee-dev/boilerplate-web",
   "templates": {
     "saas": "templates/saas",
