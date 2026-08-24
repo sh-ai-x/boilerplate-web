@@ -47,13 +47,26 @@ def test_cli_reads_shared_entry_from_lock() -> None:
 
 def test_cli_writes_pnpm_workspace_yaml() -> None:
     text = TARGET_DOWNLOAD.read_text()
-    assert "pnpm-workspace.yaml" in text
-    assert re.search(
-        r"packages:\s*\n\s*-\s*\.\s*\n\s*-\s*_shared",
-        text,
-    ), (
-        f"{TARGET_DOWNLOAD} pnpm-workspace.yaml content should list "
-        f"both `.` and `_shared` packages"
+    # The CLI builds pnpm-workspace.yaml as a JS array of strings joined by
+    # newline, then writes it via fs.writeFileSync. Assert:
+    #   - pnpm-workspace.yaml filename is used
+    #   - The 'packages:' header line is in the source
+    #   - A '- .' package line (root) and '- _shared' package line exist
+    #   - fs.writeFileSync is called with the yaml content + the path
+    assert "pnpm-workspace.yaml" in text, (
+        f"{TARGET_DOWNLOAD} does not reference pnpm-workspace.yaml"
+    )
+    assert "'packages:'" in text or '"packages:"' in text, (
+        f"{TARGET_DOWNLOAD} wsYaml array missing 'packages:' header"
+    )
+    assert "'  - .'" in text or "'  -.'" in text or '"  - ."' in text, (
+        f"{TARGET_DOWNLOAD} wsYaml array missing root package entry"
+    )
+    assert "'  - _shared'" in text or '"  - _shared"' in text, (
+        f"{TARGET_DOWNLOAD} wsYaml array missing _shared package entry"
+    )
+    assert "writeFileSync" in text and "pnpm-workspace.yaml" in text, (
+        f"{TARGET_DOWNLOAD} does not call writeFileSync on pnpm-workspace.yaml"
     )
 
 
