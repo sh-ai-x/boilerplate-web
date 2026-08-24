@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "ref": "74ac31591bcff58f2ccaa2331983e285b57adb36",
+  "ref": "7604d1620678866c866580de3e8e8fd503881c90",
   "source": "github:sanghee-dev/boilerplate-web",
   "templates": {
     "saas": "templates/saas",
@@ -18,5 +18,6 @@
     "Bump this file on each release: pin to the SHA of the merge commit that lands the templates.",
     "Consumers (the CLI) read this file at runtime to avoid drift between CLI version and template contents.",
     "checksums.<type> is the SHA-256 of templates/<type>/package.json, the lockfile entry point. The CLI verifies the on-disk package.json against this digest before using the local fast path; on mismatch it falls through to the SHA-pinned degit remote path."
-  ]
+  ],
+  "updated_at": "2026-08-24T00:00:00Z"
 }
