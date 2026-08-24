@@ -8,8 +8,6 @@ name: deploy (portfolio)
 on:
   push:
     branches: [main]
-    paths:
-      - 'templates/portfolio/**'
   workflow_dispatch:
 
 concurrency:

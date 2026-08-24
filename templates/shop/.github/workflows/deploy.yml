@@ -6,8 +6,6 @@ name: deploy (shop)
 on:
   push:
     branches: [main]
-    paths:
-      - 'templates/shop/**'
   workflow_dispatch:
 
 concurrency:
