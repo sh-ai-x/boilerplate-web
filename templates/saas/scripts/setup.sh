@@ -161,8 +161,18 @@ step_gh_secret_set() {
     if gh repo view >/dev/null 2>&1; then
       target="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
     else
+      # Could not detect the target via `gh repo view` (probably the
+      # operator has not authenticated, or this is a dry-run).
       echo "  X could not determine GH_REPO_TARGET - set it manually (e.g. export GH_REPO_TARGET=OWNER/REPO)"
-      return 1
+      if [[ "$ACTION" == "dry-run" ]]; then
+        # dry-run must not exit: emit a placeholder target so the
+        # subsequent echo commands render useful output. The operator
+        # sees the placeholder and substitutes their real OWNER/REPO
+        # when they actually run setup.sh for real.
+        target="OWNER/REPO"
+      else
+        return 1
+      fi
     fi
   fi
   for s in "${SECRETS[@]}"; do
