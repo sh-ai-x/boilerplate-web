@@ -284,25 +284,111 @@ function copyDirSync(src, dest, opts = {}) {
 // logs a warning to stderr with the manual recovery command (the user
 // can run `npx degit ...` themselves) but does NOT fail the scaffold.
 function scaffoldShared(targetFolder) {
+  const pathMod = require('path');
+  const fsMod = require('fs');
+  const childProcess = require('child_process');
+  const osMod = require('os');
+  const httpsMod = require('https');
   const lock = getLock();
   const sharedDir = lock.templates._shared;
   if (!sharedDir) return Promise.resolve();
-  const sharedTarget = path.join(targetFolder, '_shared');
+  const sharedTarget = pathMod.join(targetFolder, '_shared');
   const sharedSrc = lock.source + '#' + lock.ref + '/' + sharedDir;
-  // Use the same CJS-unwrapped degit as downloadTemplate (degit 3.x ESM compat).
-  let sharedDegit = opts => {};
+
+  let sharedDegit = null;
   try {
     const required = require('degit');
     sharedDegit = (required && typeof required.default === 'function') ? required.default : required;
-  } catch (_) { return Promise.resolve(); }
-  process.stderr.write('DEBUG scaffoldShared: sharedSrc=' + sharedSrc + ' sharedTarget=' + sharedTarget + ' sharedDegit type=' + typeof sharedDegit + '\n');
-  return Promise.resolve().then(() => sharedDegit(sharedSrc, { cache: false, force: opts => opts && opts.force, verbose: false }))
-    .then(sharedEmitter => {
-      process.stderr.write('DEBUG: got sharedEmitter type=' + typeof sharedEmitter + ' has .clone=' + (sharedEmitter && typeof sharedEmitter.clone) + '\n');
-      return sharedEmitter.clone(sharedTarget);
-    })
-    .then(() => process.stderr.write('DEBUG: shared cloned successfully\n'))
-    .then(() => {
+  } catch (_) {}
+  if (!sharedDegit) {
+    try {
+      let dir = __dirname;
+      for (let i = 0; i < 10; i++) {
+        const candidate = pathMod.join(dir, 'node_modules', 'degit');
+        if (fsMod.existsSync(candidate)) {
+          const required = require(candidate);
+          sharedDegit = (required && typeof required.default === 'function') ? required.default : required;
+          break;
+        }
+        const parent = pathMod.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+    } catch (_) {}
+  }
+  if (!sharedDegit) {
+    sharedDegit = function (src, opts) {
+      return {
+        clone: function (dest) {
+          const m = String(src).match(/^github:([^#]+)#([^/]+)(?:\/(.+))?$/);
+          if (!m) throw new Error('cannot scaffold non-github source: ' + src);
+          const repo = m[1];
+          const ref = m[2];
+          const subpath = m[3];
+          const tar = new Promise(function (resolve, reject) {
+            const fetch = function (url) {
+              httpsMod.get(url, function (res) {
+                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                  fetch(res.headers.location); res.resume(); return;
+                }
+                if (res.statusCode !== 200) { reject(new Error('codeload HTTP ' + res.statusCode)); return; }
+                const chunks = [];
+                res.on('data', function (c) { chunks.push(c); });
+                res.on('end', function () { resolve(Buffer.concat(chunks)); });
+                res.on('error', reject);
+              }).on('error', reject);
+            };
+            fetch('https://codeload.github.com/' + repo + '/tar.gz/' + ref);
+          });
+          return tar.then(function (tarBuf) {
+            // Extract the tarball to a tmp subdir so the dir itself doesn't
+            // appear in readdirSync (we'd otherwise see the tar file + the
+            // extracted dir + nested files, breaking the "1 item" check).
+            const tmpRoot = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'cbw-shared-'));
+            const tmpTar = pathMod.join(tmpRoot, 'repo.tar');
+            const extractDir = pathMod.join(tmpRoot, 'extracted');
+            fsMod.mkdirSync(extractDir);
+            fsMod.writeFileSync(tmpTar, tarBuf);
+            childProcess.execFileSync('tar', ['-xzf', tmpTar, '-C', extractDir]);
+            fsMod.unlinkSync(tmpTar);
+            // GitHub tarballs have a single top-level dir like
+            // 'boilerplate-web-<short-sha>/'. The subpath (if any) is relative
+            // to that inner dir.
+            const innerItems = fsMod.readdirSync(extractDir);
+            if (innerItems.length === 1 && fsMod.statSync(pathMod.join(extractDir, innerItems[0])).isDirectory()) {
+              const source = pathMod.join(extractDir, innerItems[0], subpath || '.');
+              if (fsMod.existsSync(source)) {
+                fsMod.mkdirSync(dest, { recursive: true });
+                // Use cp + rm (mv across filesystems can fail on macOS)
+                // cp -R with trailing /. has been seen to be unreliable on
+                // macOS for some path layouts (creates an extra dir). Use rsync
+                // for portability. If rsync isn't available, fall back to mv
+                // (requires the inner dir to be in the same filesystem as dest,
+                // which is true here since /tmp is local).
+                if (fsMod.existsSync(pathMod.join(source, '.DS_Store'))) {
+                  // has dotfiles, just rsync -a
+                }
+                try {
+                  childProcess.execFileSync('rsync', ['-a', source + '/.', dest + '/'], { stdio: 'pipe' });
+                } catch (_) {
+                  // Fallback: cp -R (last resort)
+                  childProcess.execFileSync('cp', ['-R', source + '/.', dest + '/']);
+                }
+              } else {
+                process.stderr.write('Warning: subpath ' + subpath + ' not found in ' + repo + '@' + ref + '\n');
+              }
+            } else {
+              process.stderr.write('Warning: unexpected tarball structure from ' + repo + '@' + ref + ' (items=' + innerItems.length + ')\n');
+            }
+            childProcess.execFileSync('rm', ['-rf', tmpRoot]);
+          });
+        }
+      };
+    };
+  }
+
+  return sharedDegit(sharedSrc, { cache: false, force: true, verbose: false }).clone(sharedTarget)
+    .then(function () {
       const wsYaml = [
         '# Auto-generated by create-boilerplate-web (phase 2-deploy-automation).',
         '# The user template references @boilerplate-web/shared via workspace:*,',
@@ -312,9 +398,9 @@ function scaffoldShared(targetFolder) {
         '  - _shared',
         '',
       ].join('\n');
-      fs.writeFileSync(path.join(targetFolder, 'pnpm-workspace.yaml'), wsYaml);
+      fsMod.writeFileSync(pathMod.join(targetFolder, 'pnpm-workspace.yaml'), wsYaml);
     })
-    .catch(sharedErr => {
+    .catch(function (sharedErr) {
       process.stderr.write(
         'Warning: could not scaffold _shared/ (' + sharedErr.message + '). ' +
         'Run `npx degit "' + sharedSrc + '" _shared` in the target dir.\n'
