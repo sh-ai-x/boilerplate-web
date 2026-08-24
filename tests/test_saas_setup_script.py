@@ -57,6 +57,21 @@ def test_setup_md_lists_all_7_secrets() -> None:
         assert s in text, f"SETUP.md missing {s} (must match docs/DEPLOY_SECRETS.md SSOT)"
 
 
+def test_setup_md_mentions_pnpm_not_npm() -> None:
+    """This boilerplate uses pnpm workspaces (workspace:* in package.json is
+    pnpm-only). SETUP.md must explicitly say pnpm so operators don't lose
+    10 minutes to the npm/workspace:* EUNSUPPORTEDPROTOCOL error."""
+    text = SETUP_MD.read_text()
+    assert "pnpm install" in text, (
+        "SETUP.md does not mention `pnpm install` - operators will hit "
+        "`EUNSUPPORTEDPROTOCOL: workspace:*` if they fall back to npm"
+    )
+    # The warning that npm will fail is important (PR #64 surfaced this gap)
+    assert "EUNSUPPORTEDPROTOCOL" in text or "Don't run `npm install`" in text, (
+        "SETUP.md does not warn about the npm/workspace:* incompatibility"
+    )
+
+
 def test_setup_md_links_to_dashboard_urls() -> None:
     """Operator should never have to guess where to click."""
     text = SETUP_MD.read_text()

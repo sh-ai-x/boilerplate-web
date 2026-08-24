@@ -67,10 +67,23 @@
 
 ## Local env: one file
 
-### Step 5 — fill in `.env.local`
+### Step 5a — install pnpm + scaffold deps
+
+> ⚠️ **Important**: this boilerplate uses **pnpm** (the `workspace:*` protocol in `package.json` is pnpm-only). **Don't run `npm install`** — it fails with `EUNSUPPORTEDPROTOCOL: workspace:*`.
 
 ```bash
-cd <dir>            # the folder you scaffolded into
+# Install pnpm if you don't have it (one-time)
+npm install -g pnpm                         # (or: brew install pnpm / winget install pnpm)
+pnpm --version                              # verify (>= 8.x recommended)
+
+# Then install deps
+cd <dir>                                     # the folder you scaffolded into
+pnpm install --frozen-lockfile                # uses pnpm-lock.yaml if present; otherwise pnpm install
+```
+
+### Step 5b — fill in `.env.local`
+
+```bash
 cp .env.example .env.local
 $EDITOR .env.local  # paste in the 7 values from steps 1-4 above
 ```
