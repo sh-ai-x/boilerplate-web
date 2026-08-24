@@ -3,51 +3,69 @@
   "phase": "1-cli-distribution",
   "project": "boilerplate-web",
   "created_at": "2026-07-30T00:00:00Z",
-  "worktree": "plan/boilerplate-cli-distribution",
+  "worktree": "fix/1-cli-distribution-step2",
   "ambiguity_score": 2,
   "value_score": 125.0,
   "evidence_count": 3,
   "totals": {
-    "completed": 1,
+    "completed": 6,
     "blocked": 0,
-    "pending": 5,
-    "completion_pct": 16.67
+    "pending": 0,
+    "completion_pct": 100
   },
   "steps": [
     {
       "step": 0,
       "name": "npm-package-config",
       "title": "Finalize npm package config (bin, files, publishConfig, name)",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "delivered_via": { "pr": { "number": 44, "state": "MERGED" }, "branch": "plan/boilerplate-cli-distribution-step0" },
+      "output_ref": "phases/1-cli-distribution/step0-output.json"
     },
     {
       "step": 1,
       "name": "cli-bundle-build",
       "title": "Bundle cli/ into dist/cli.js via tsc/esbuild",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "delivered_via": { "pr": { "number": 45, "state": "MERGED" }, "branch": "plan/boilerplate-cli-distribution-step1" },
+      "output_ref": "phases/1-cli-distribution/step1-output.json"
     },
     {
       "step": 2,
       "name": "ci-publish-workflow",
       "title": ".github/workflows/publish.yml with OIDC trusted publishing",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "completed_at": "2026-08-19T13:03:09Z",
+      "summary": ".github/workflows/publish.yml with OIDC trusted publishing (no NPM_TOKEN): dist-tag derived from ref (latest/rc/beta/alpha), npm-publish environment approval gate, post-build CLI smoke check, workflow_dispatch restricted to main, SHA-pinned actions. Written and AC-verified twice before (PR #46, PR #51) but reverted out of both PRs before merge -- this pass restores the identical content and lands it.",
+      "delivered_via": {
+        "pr": { "number": null, "state": "PENDING", "branch": "fix/1-cli-distribution-step2" },
+        "predecessor_attempts": [
+          { "pr": 46, "state": "CLOSED", "note": "stalled on stale severity-gate verdicts" },
+          { "pr": 51, "state": "MERGED", "note": "merged bookkeeping only; publish.yml itself reverted out before merge" }
+        ]
+      },
+      "output_ref": "phases/1-cli-distribution/step2-output.json",
+      "external_prerequisite": "create-boilerplate-web must be registered as an npm trusted publisher for this repo+workflow on npmjs.org, and the npm-publish GitHub Environment needs required reviewers configured, before the first tag push can succeed."
     },
     {
       "step": 3,
       "name": "e2e-scaffold-test",
       "title": "CI matrix: end-to-end scaffold test for saas/shop/portfolio",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "delivered_via": { "pr": { "number": 53, "state": "MERGED" }, "branch": "chore/fix-pr50-followup", "note": "e2e-scaffold-test + security hardening; predecessor attempts PR #47, #50 closed unmerged" }
     },
     {
       "step": 4,
       "name": "readme-install-instructions",
       "title": "Root README install instructions for npx create-boilerplate-web",
-      "status": "pending",
-      "ambiguity_delta": 0.0
+      "status": "completed",
+      "ambiguity_delta": 0.0,
+      "delivered_via": { "pr": { "number": 48, "state": "MERGED" }, "branch": "plan/boilerplate-cli-distribution-step4" },
+      "output_ref": "phases/1-cli-distribution/step4-output.json"
     },
     {
       "step": 5,
@@ -55,8 +73,11 @@
       "title": "Tag-trigger release flow for v0.x + release guide",
       "status": "completed",
       "ambiguity_delta": 0.0,
-      "last_update": "2026-07-30T16:17:39Z"
+      "last_update": "2026-07-30T16:17:39Z",
+      "delivered_via": { "pr": { "number": 49, "state": "MERGED" }, "branch": "plan/boilerplate-cli-distribution-step5" },
+      "output_ref": "phases/1-cli-distribution/step5-output.json"
     }
   ],
-  "updated_at": "2026-07-30T16:17:39Z"
+  "reconciliation_note": "This file previously showed only step 5 completed (1/6, 16.67%) even though steps 0/1/3/4 were already merged on main. Cause: PR #49's merge conflict resolution kept the step-5 branch's stale copy of index.json over main's already-updated copy, silently reverting the recorded progress for those steps. Reconciled 2026-08-19 against actual PR-merge history.",
+  "updated_at": "2026-08-19T13:03:09Z"
 }
