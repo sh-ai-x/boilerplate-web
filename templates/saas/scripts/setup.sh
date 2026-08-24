@@ -60,6 +60,17 @@ load_env() {
 }
 
 # Prereq checks: tool installed + authenticated + .env.local valid.
+#
+# Modes:
+#   --check    : prereq failure is fatal (the WHOLE point of --check is
+#                to surface missing prereqs)
+#   --dry-run  : prereq failure is INFORMATIVE only. dry-run echoes the
+#                commands that would run; missing tools just mean the
+#                user can't actually run them. Print but don't fail
+#                (so callers can render the plan without a sandboxed
+#                CI environment having all the deps).
+#   (run)     : prereq failure is fatal. We will not silently run a
+#                half-configured deploy.
 check_prereqs() {
   local failed=0
   echo "-- prereq checks ($ACTION mode) --"
@@ -68,30 +79,33 @@ check_prereqs() {
       echo "  ok $cmd installed"
     else
       echo "  X $cmd missing - install from SETUP.md step 6-7"
-      failed=1
+      [[ "$ACTION" == "dry-run" ]] || failed=1
     fi
   done
   if gh auth status >/dev/null 2>&1; then
     echo "  ok gh authenticated"
   else
     echo "  X gh not authenticated - run 'gh auth login' first"
-    failed=1
+    [[ "$ACTION" == "dry-run" ]] || failed=1
   fi
   if supabase projects list >/dev/null 2>&1; then
     echo "  ok supabase authenticated"
   else
     echo "  X supabase not authenticated - run 'supabase login' first"
-    failed=1
+    [[ "$ACTION" == "dry-run" ]] || failed=1
   fi
   if load_env; then
     echo "  ok .env.local: all 7 required keys present"
   else
-    failed=1
+    [[ "$ACTION" == "dry-run" ]] || failed=1
   fi
   if [[ "$failed" -ne 0 ]]; then
     echo ""
     echo "X One or more prereqs failed. See SETUP.md before re-running."
     return 1
+  fi
+  if [[ "$ACTION" == "dry-run" ]]; then
+    echo "  (dry-run continues below - prereqs above are reported but not enforced)"
   fi
   echo ""
   return 0
