@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>saas Setup & Deploy Guide</title>
+<style>
+  body { font: 14px/1.5 -apple-system, sans-serif; padding: 20px; max-width: 920px; margin: 0 auto; }
+  h1 { border-bottom: 1px solid #ccc; padding-bottom: 8px; }
+  .step { border: 1px solid #ddd; padding: 16px; margin: 16px 0; border-radius: 6px; background: #fafafa; }
+  .step.completed { opacity: 0.55; }
+  pre { background: #1e1e1e; color: #d4d4d4; padding: 12px; overflow-x: auto; border-radius: 4px; position: relative; }
+  pre button { position: absolute; top: 6px; right: 6px; }
+  .check { display: flex; align-items: center; gap: 10px; padding: 8px; background: #eee; border-radius: 4px; cursor: pointer; }
+  details summary { cursor: pointer; font-weight: 600; }
+  .warn { background: #fee; border-left: 4px solid #c00; padding: 8px 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }
+  code { background: #eef; padding: 1px 4px; }
+  .progress-bar { background: #eee; border-radius: 4px; height: 16px; }
+  .progress-bar > div { background: #0070f3; height: 100%; }
+  footer { color: #888; font-size: 12px; text-align: center; margin: 32px 0; }
+</style>
+</head>
+<body>
+<h1>saas - Setup &amp; Deploy Guide</h1>
+<p>Stay open in your browser while running these commands in another terminal.</p>
+<div class="progress"><div class="progress-bar"><div id="pf"></div></div></div>
+
+<section class="step" id="step-0" data-step="0">
+<h2>Step 0 - Scaffold (one line)</h2>
+<pre><code>npx create-boilerplate-web ./my-saas --type=saas --yes --allow-unsafe-path --skip-install --deploy</code><button data-copy>copy</button></pre>
+<label class="check"><input type="checkbox" data-step-check="0">Done - scaffolded target exists</label>
+</section>
+<section class="step" id="step-1" data-step="1">
+<h2>Step 1 - Install deps (pnpm, not npm)</h2>
+<div class="warn">WARNING: Don't run npm install - fails with EUNSUPPORTEDPROTOCOL: workspace:*. This boilerplate uses pnpm workspaces.</div>
+<pre><code>cd ./my-saas
+npm install -g pnpm     # if you don't have pnpm (one-time)
+pnpm install</code><button data-copy>copy</button></pre>
+<label class="check"><input type="checkbox" data-step-check="1">Done - pnpm install completed</label>
+</section>
+
+<section class="step" id="step-2" data-step="2">
+<h2>Step 2 - Fill in .env.local (13 keys, 4 dashboards)</h2>
+<pre><code>cp .env.example .env.local
+$EDITOR .env.local</code><button data-copy>copy</button></pre>
+<details><summary>Where to get each key (4 dashboards)</summary>
+<ul>
+<li><b>Supabase</b>: dashboard -> new project -> Settings API + Settings General + Account Tokens</li>
+<li><b>Vercel</b>: signup with GitHub -> Account Settings for org id, account/tokens for token</li>
+<li><b>Cloudflare</b>: add domain -> Account ID + Zone ID, profile/api-tokens for zone-WAF token</li>
+<li><b>Toss</b>: tosspayments.com developer dashboard, API keys for Live Secret + Auth</li>
+</ul></details>
+<table><thead><tr><th>Key</th><th>Source</th></tr></thead><tbody>
+<tr><td><code>NEXT_PUBLIC_SUPABASE_URL</code></td><td>Supabase API Project URL</td></tr>
+<tr><td><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></td><td>Supabase API anon public</td></tr>
+<tr><td><code>SUPABASE_SERVICE_ROLE_KEY</code></td><td>Supabase API service_role</td></tr>
+<tr><td><code>NEXT_PUBLIC_TURNSTILE_SITE_KEY</code></td><td>Cloudflare Turnstile widget</td></tr>
+<tr><td><code>TURNSTILE_SECRET_KEY</code></td><td>Cloudflare Turnstile server verify</td></tr>
+<tr><td><code>TOSS_SECRET_KEY</code></td><td>Toss API keys Live Secret</td></tr>
+<tr><td><code>TOSS_AUTH_KEY</code></td><td>Toss API keys Live Auth</td></tr>
+<tr><td><code>VERCEL_TOKEN</code></td><td>Vercel Tokens</td></tr>
+<tr><td><code>VERCEL_ORG_ID</code></td><td>Vercel Account Your ID</td></tr>
+<tr><td><code>CF_API_TOKEN</code></td><td>Cloudflare API Tokens (zone WAF scope)</td></tr>
+<tr><td><code>CF_ZONE_ID</code></td><td>Cloudflare zone Zone ID</td></tr>
+<tr><td><code>SUPABASE_ACCESS_TOKEN</code></td><td>Supabase Account Tokens (account-wide)</td></tr>
+<tr><td><code>SUPABASE_PROJECT_REF</code></td><td>Supabase Settings General Reference ID</td></tr>
+</tbody></table>
+<label class="check"><input type="checkbox" data-step-check="2">Done - .env.local populated with 13 keys</label>
+</section>
+<section class="step" id="step-3" data-step="3">
+<h2>Step 3 - Verify prereqs</h2>
+<pre><code>./scripts/setup.sh --check</code><button data-copy>copy</button></pre>
+<p>Should print: prereqs OK, run without --check to execute setup.</p>
+<label class="check"><input type="checkbox" data-step-check="3">Done - --check exits 0</label>
+</section>
+
+<section class="step" id="step-4" data-step="4">
+<h2>Step 4 - Run setup</h2>
+<pre><code>export GH_REPO_NAME=my-saas
+./scripts/setup.sh</code><button data-copy>copy</button></pre>
+<p>Does: supabase link + db push + functions deploy billing + git init/commit + gh repo create/push + gh secret set x7.</p>
+<label class="check"><input type="checkbox" data-step-check="4">Done - ok setup.sh finished.</label>
+</section>
+
+<section class="step" id="step-5" data-step="5">
+<h2>Step 5 - Push to default branch (trigger first deploy)</h2>
+<p>If setup.sh already pushed (gh repo create --push), skip ahead. Otherwise:</p>
+<pre><code>git remote add origin https://github.com/&lt;OWNER&gt;/&lt;REPO&gt;.git
+git branch -M default-branch-name
+git push -u origin default-branch-name</code><button data-copy>copy</button></pre>
+<label class="check"><input type="checkbox" data-step-check="5">Done - first push landed on default branch</label>
+</section>
+<section class="step" id="step-6" data-step="6">
+<h2>Step 6 - Watch first deploy</h2>
+<pre><code>gh run watch --repo "&lt;OWNER&gt;/&lt;REPO&gt;"</code><button data-copy>copy</button></pre>
+<p>3 jobs: deploy-shared (Vercel + CF Pages), supabase-functions (billing), cloudflare-waf.</p>
+<label class="check"><input type="checkbox" data-step-check="6">Done - 3 jobs green</label>
+</section>
+
+<section class="step" id="step-7" data-step="7">
+<h2>Step 7 - Import Vercel project (one-time)</h2>
+<ol>
+<li>vercel.com/dashboard</li>
+<li>Add New -&gt; Project</li>
+<li>Pick the repo</li>
+<li>Accept Next.js build settings</li>
+<li>Deploy</li>
+</ol>
+<p>After deploy, verify with:</p>
+<pre><code>open "$(gh api repos/&lt;OWNER&gt;/&lt;REPO&gt; --jq .homepage)"</code><button data-copy>copy</button></pre>
+<label class="check"><input type="checkbox" data-step-check="7">Done - Vercel URL returns 200</label>
+</section>
+
+<section class="step" id="step-8" data-step="8">
+<h2>Step 8 - Verify Supabase + Cloudflare WAF</h2>
+<pre><code>supabase functions list --project-ref "$SUPABASE_PROJECT_REF"</code><button data-copy>copy</button></pre>
+<p>Cloudflare: dash.cloudflare.com -&gt; zone -&gt; Security -&gt; WAF -&gt; Custom Rules should show 6 rules.</p>
+<label class="check"><input type="checkbox" data-step-check="8">Done - billing deployed + 6 WAF rules visible</label>
+</section>
+
+<footer>Generated by create-boilerplate-web phase 2-deploy-automation.</footer>
+
+<script>
+const STORAGE_KEY = 'saas-setup-progress';
+const STEPS = ['0','1','2','3','4','5','6','7','8'];
+function loadProgress() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { return {}; } }
+function saveProgress(p) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch (e) {} }
+function updateUI() {
+  const p = loadProgress();
+  let done = 0;
+  for (const n of STEPS) {
+    const cb = document.querySelector('input[data-step-check="' + n + '"]');
+    const section = document.getElementById('step-' + n);
+    if (cb && p[n]) { cb.checked = true; done++; section && section.classList.add('completed'); }
+    else if (cb) { cb.checked = false; section && section.classList.remove('completed'); }
+  }
+  const pf = document.getElementById('pf');
+  if (pf) pf.style.width = (done / STEPS.length) * 100 + '%';
+}
+for (const n of STEPS) {
+  const cb = document.querySelector('input[data-step-check="' + n + '"]');
+  if (cb) cb.addEventListener('change', function() {
+    const p = loadProgress();
+    p[n] = cb.checked;
+    saveProgress(p);
+    updateUI();
+  });
+}
+for (const btn of document.querySelectorAll('button[data-copy]')) {
+  btn.addEventListener('click', async function() {
+    const pre = btn.closest('pre');
+    const code = pre.querySelector('code');
+    const text = code.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = 'copied';
+      setTimeout(function() { btn.textContent = 'copy'; }, 1500);
+    } catch (e) {
+      const range = document.createRange();
+      range.selectNodeContents(code);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      btn.textContent = 'select+copy';
+    }
+  });
+}
+updateUI();
+</script>
+</body>
+</html>
