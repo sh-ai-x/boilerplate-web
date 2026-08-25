@@ -1,52 +1,79 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { GoogleSignInButton } from '../auth/GoogleSignInButton';
+import { render, screen, waitFor } from '@testing-library/react';
+import { useAuth } from '@clerk/nextjs';
 
-// Stub the supabase client module before importing the component.
-const signInWithOAuth = vi.fn();
-vi.mock('../supabase/client', () => ({
-  createBrowserSupabase: () => ({
-    auth: {
-      signInWithOAuth,
-    },
-  }),
+// Mock Clerk's useAuth hook. The boilerplate's <SubscribeButton> reads
+// isSignedIn + getToken() and routes to /sign-in for signed-out users.
+vi.mock('@clerk/nextjs', () => ({
+  useAuth: vi.fn(),
+  useSession: vi.fn(),
+  useUser: vi.fn(),
+  SignIn: () => <div data-testid="clerk-signin" />,
+  SignUp: () => <div data-testid="clerk-signup" />,
+  SignInButton: () => <button data-testid="clerk-signin-btn">Sign in</button>,
+  UserButton: () => <button data-testid="clerk-user-btn" />,
 }));
 
-beforeEach(() => {
-  signInWithOAuth.mockReset();
-  // Reset window.location.origin to a known value
-  Object.defineProperty(window, 'location', {
-    value: { origin: 'http://localhost:3000' },
-    writable: true,
-  });
-});
+import { SubscribeButton } from '../../components/SubscribeButton';
 
-describe('GoogleSignInButton (PRD non-goal #1: Google OAuth ONLY)', () => {
-  it('renders a single sign-in button with no email input (AC1, AC4)', () => {
-    render(<GoogleSignInButton />);
-    const button = screen.getByTestId('google-signin-button');
-    expect(button).toBeInTheDocument();
-    // PRD non-goal #1: no email/password/magic-link affordances anywhere.
-    expect(document.querySelector('input[type="email"]')).toBeNull();
-    expect(document.querySelector('input[type="password"]')).toBeNull();
-    expect(document.querySelector('input[name="email"]')).toBeNull();
-    expect(document.querySelector('input[type="text"][name*="magic" i]')).toBeNull();
+const useAuthMock = vi.mocked(useAuth);
+
+describe('SubscribeButton (Clerk auth)', () => {
+  beforeEach(() => {
+    useAuthMock.mockReset();
+    useAuthMock.mockReturnValue({
+      isSignedIn: true,
+      isLoaded: true,
+      userId: 'user_test',
+      sessionId: 'sess_test',
+      getToken: vi.fn().mockResolvedValue('jwt_test'),
+      signOut: vi.fn(),
+    } as never);
   });
 
-  it('calls signInWithOAuth with provider=google and redirectTo=/auth/callback', async () => {
-    signInWithOAuth.mockResolvedValue({ error: null });
-    render(<GoogleSignInButton />);
-    await fireEvent.click(screen.getByTestId('google-signin-button'));
-    expect(signInWithOAuth).toHaveBeenCalledWith({
-      provider: 'google',
-      options: { redirectTo: 'http://localhost:3000/auth/callback' },
+  it('redirects signed-out users to the sign-in page', () => {
+    useAuthMock.mockReturnValue({
+      isSignedIn: false,
+      isLoaded: true,
+      userId: null,
+      sessionId: null,
+      getToken: vi.fn(),
+      signOut: vi.fn(),
+    } as never);
+    render(<SubscribeButton planId="plan_test" />);
+    expect(screen.getByRole('link', { name: /sign in to subscribe/i })).toBeTruthy();
+  });
+
+  it('renders a Subscribe button when signed in', () => {
+    render(<SubscribeButton planId="plan_test" />);
+    expect(screen.getByRole('button', { name: /subscribe/i })).toBeTruthy();
+  });
+
+  it('fetches the billing endpoint with the Clerk session JWT', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, subscription_id: 'sub_123' }),
     });
-  });
+    vi.stubGlobal('fetch', mockFetch);
+    // Pretend the user pastes an authKey at the prompt
+    vi.spyOn(window, 'prompt').mockReturnValue('authkey_test');
 
-  it('surfaces an error message if signInWithOAuth rejects', async () => {
-    signInWithOAuth.mockResolvedValue({ error: { message: 'oauth failed' } });
-    render(<GoogleSignInButton />);
-    await fireEvent.click(screen.getByTestId('google-signin-button'));
-    expect(await screen.findByTestId('google-signin-error')).toHaveTextContent('oauth failed');
+    render(<SubscribeButton planId="plan_test" />);
+    screen.getByRole('button', { name: /subscribe/i }).click();
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toMatch(/\/functions\/v1\/billing$/);
+    expect(init.method).toBe('POST');
+    expect(init.headers.authorization).toMatch(/^Bearer /);
+    const body = JSON.parse(init.body);
+    expect(body.plan_id).toBe('plan_test');
+    expect(body.auth_key).toBe('authkey_test');
+    // The legacy fields must NOT be sent.
+    expect(body).not.toHaveProperty('customer_key');
+    expect(body).not.toHaveProperty('turnstile_token');
+    expect(body).not.toHaveProperty('amount');
   });
 });

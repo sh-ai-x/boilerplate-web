@@ -11,9 +11,8 @@ the price from the `plans` table and ignores any client-supplied amount.
 - **Google OAuth client** — create a Web application OAuth client at
   <https://console.cloud.google.com/apis/credentials>. Authorized redirect
   URI: `https://YOUR_PROJECT.supabase.co/auth/v1/callback`.
-- **Cloudflare account** — for the Turnstile widget and the WAF rules in
-  `/cloudflare-rules.json`. Create a Turnstile widget at
-  <https://dash.cloudflare.com/?to=/:account/turnstile>.
+- **Cloudflare account** — for the WAF rules in `/cloudflare-rules.json`.
+  (Captcha is handled by Clerk; no
 - **Toss Payments account** — get `TOSS_SECRET_KEY` and `TOSS_AUTH_KEY` from
   the Toss dashboard. Create a plan (or three) in Toss and note the
   `toss_plan_key` for each.

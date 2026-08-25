@@ -84,7 +84,7 @@ pnpm install</code><button data-copy>copy</button></pre>
 </section>
 
 <section class="step" id="step-2" data-step="2">
-<h2>Step 2 - Fill in .env.local (13 keys, 4 dashboards)</h2>
+<h2>Step 2 - Fill in .env.local (7 keys, 4 dashboards)</h2>
 <pre><code>cp .env.example .env.local
 $EDITOR .env.local</code><button data-copy>copy</button></pre>
 <details><summary>Where to get each key (4 dashboards)</summary>
@@ -98,8 +98,8 @@ $EDITOR .env.local</code><button data-copy>copy</button></pre>
 <tr><td><code>NEXT_PUBLIC_SUPABASE_URL</code></td><td>Supabase API Project URL</td></tr>
 <tr><td><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></td><td>Supabase API anon public</td></tr>
 <tr><td><code>SUPABASE_SERVICE_ROLE_KEY</code></td><td>Supabase API service_role</td></tr>
-<tr><td><code>NEXT_PUBLIC_TURNSTILE_SITE_KEY</code></td><td>Cloudflare Turnstile widget</td></tr>
-<tr><td><code>TURNSTILE_SECRET_KEY</code></td><td>Cloudflare Turnstile server verify</td></tr>
+<tr><td><code>NEXT_PUBLIC_TURNSTILE_SITE_KEY</code></td><td>Cloudflare
+<tr><td><code>TURNSTILE_SECRET_KEY</code></td><td>Cloudflare
 <tr><td><code>TOSS_SECRET_KEY</code></td><td>Toss API keys Live Secret</td></tr>
 <tr><td><code>TOSS_AUTH_KEY</code></td><td>Toss API keys Live Auth</td></tr>
 <tr><td><code>VERCEL_TOKEN</code></td><td>Vercel Tokens</td></tr>
@@ -109,7 +109,10 @@ $EDITOR .env.local</code><button data-copy>copy</button></pre>
 <tr><td><code>SUPABASE_ACCESS_TOKEN</code></td><td>Supabase Account Tokens (account-wide)</td></tr>
 <tr><td><code>SUPABASE_PROJECT_REF</code></td><td>Supabase Settings General Reference ID</td></tr>
 </tbody></table>
-<label class="check"><input type="checkbox" data-step-check="2">Done - .env.local populated with 13 keys</label>
+<p style="margin-top:12px; padding:10px 12px; background:var(--bg-code); border-left:3px solid var(--blue); border-radius:6px; color:var(--fg-muted); font-size:13px;">
+<strong style="color:var(--fg);">6 more secrets</strong> (VERCEL_TOKEN, VERCEL_ORG_ID, CF_API_TOKEN, CF_ZONE_ID, SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF) go into <strong>GitHub Actions secrets</strong> only - <code>./scripts/setup.sh</code> sets them automatically in Step 4. You do <strong>NOT</strong> edit them in <code>.env.local</code>.
+</p>
+<label class="check"><input type="checkbox" data-step-check="2">Done - 7 placeholders replaced with my actual values</label>
 </section>
 <section class="step" id="step-3" data-step="3">
 <h2>Step 3 - Verify prereqs</h2>

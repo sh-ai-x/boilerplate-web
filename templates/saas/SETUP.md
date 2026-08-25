@@ -22,7 +22,7 @@
 **Single local command required after env vars are set:**
 
 ```bash
-./scripts/setup.sh          # does steps 5-7 (sets .env.local placeholders, links Supabase, deploys Edge Function, sets GitHub secrets)
+./scripts/setup.sh          # does steps 5-7 (auto-fills .env.local from MCP/API tokens if present, links Supabase, deploys Edge Function, sets GitHub secrets)
 ```
 
 ## Pre-flight: external accounts (one-time)
@@ -81,21 +81,44 @@ cd <dir>                                     # the folder you scaffolded into
 pnpm install --frozen-lockfile                # uses pnpm-lock.yaml if present; otherwise pnpm install
 ```
 
-### Step 5b — fill in `.env.local`
+### Step 5b — fill in `.env.local` (7 keys, the saas runtime config)
+
+> **Auto-fill with MCP/API tokens** — if you have these in your shell, `setup.sh` will auto-populate `.env.local` from the live APIs (no manual paste needed):
+>
+> ```bash
+> export SUPABASE_ACCESS_TOKEN="sbp_xxxxx"   # https://supabase.com/dashboard/account/tokens
+> export SUPABASE_PROJECT_REF="abcdefghijklmnopqrstu"  # Settings -> General
+> export VERCEL_TOKEN="vercel_xxxxx"          # https://vercel.com/account/tokens
+> # (Cloudflare tokens don't auto-fill .env.local; CF_ZONE_ID is per-domain, filled in Step 7)
+> ```
+>
+> Without these set, fall back to the manual edit below.
 
 ```bash
 cp .env.example .env.local
-$EDITOR .env.local  # paste in the 7 values from steps 1-4 above
+$EDITOR .env.local   # find-replace YOUR_xxx placeholders with your actual values (or skip this if you exported SUPABASE_ACCESS_TOKEN / VERCEL_TOKEN above — `./scripts/setup.sh` will auto-fill from the API)
 ```
 
-`.env.example` already lists every key with a one-line comment.
+The 7 keys in saas `.env.example` (from this scaffold) are:
+
+| Key | Source |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → API → Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → API → anon public |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → API → service_role (server-only) |
+| `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile server verify |
+| `TOSS_SECRET_KEY` | Toss → API 키 → Live Secret |
+| `TOSS_AUTH_KEY` | Toss → API 키 → Live Auth |
+
+> The 6 *other* secrets used by the deploy workflow (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `CF_API_TOKEN`, `CF_ZONE_ID`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`) are **NOT** in `.env.local` — they are set as GitHub Actions secrets in Step 6 by `./scripts/setup.sh` itself. You don't need to type them in `.env.local`.
 
 ## Supabase + GitHub: one CLI setup script
 
 ### Step 6 + 7 — `./scripts/setup.sh` does both
 
 The script lives at `<dir>/scripts/setup.sh` (created by this scaffold). It:
-- Reads your `.env.local`
+- First calls `./scripts/auto-fill-env.sh` if MCP/API tokens are in your shell env (fills .env.local from live APIs)
+- Then reads your `.env.local`
 - Runs `supabase link` (links your local repo to the project from step 1)
 - Runs `supabase db push` (applies migrations)
 - Runs `supabase functions deploy billing` (deploys the Edge Function)

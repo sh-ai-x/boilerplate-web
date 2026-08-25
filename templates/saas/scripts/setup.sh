@@ -43,6 +43,12 @@ run() {
 }
 
 # Load .env.local into shell vars (used by Supabase + gh steps).
+# If MCP / API tokens are in the shell env, fill .env.local first
+# (idempotent - leaves any existing user-edited keys alone)
+if [[ -f "${ROOT}/scripts/auto-fill-env.sh" ]]; then
+  bash "${ROOT}/scripts/auto-fill-env.sh" 2>/dev/null || true
+fi
+
 load_env() {
   if [[ ! -f .env.local ]]; then
     echo "  X .env.local missing - copy .env.example -> .env.local and fill in the 7 keys."

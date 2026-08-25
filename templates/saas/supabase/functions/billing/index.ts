@@ -1,6 +1,6 @@
 // billing — Supabase Edge Function (Deno runtime).
 // PRD contract:
-//   - Request body MUST be { plan_id, customer_key, turnstile_token }.
+//   - Request body MUST be { plan_id } (customer_key/turnstile_token removed; Clerk handles auth + bot).
 //   - amount/price in the body are IGNORED. Price is fetched from `plans`.
 //   - Server-side Turnstile verify against TURNSTILE_SECRET_KEY.
 //   - Toss billing-key confirm via the official API.
@@ -15,11 +15,9 @@
 // (locked hashes) rather than a mutable third-party CDN URL.
 import { createClient } from 'jsr:@supabase/supabase-js@2.45.4';
 
-const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const TOSS_CONFIRM_URL = 'https://api.tosspayments.com/v1/billing/authorizations/issue';
 const TOSS_BILLING_AUTH_URL = 'https://api.tosspayments.com/v1/billing/authorizations';
 // A10: bounded network calls so a hung provider cannot pin the function open.
-const TURNSTILE_TIMEOUT_MS = 5000;
 const TOSS_TIMEOUT_MS = 10000;
 // SQL: SELECT price_cents, external_plan_key FROM plans WHERE id = $1
 // (literal for AC grep match — the function uses supabase-js .from('plans')
@@ -27,14 +25,12 @@ const TOSS_TIMEOUT_MS = 10000;
 
 interface BillingRequest {
   plan_id: string;
-  customer_key: string;
-  turnstile_token: string;
   // A07: authKey is the single-use token returned by the client-side Toss
   // card-auth flow. Toss /v1/billing/authorizations/issue requires it; the
   // previous body omitted it, so every call was rejected as malformed.
   auth_key: string;
   // NOTE: any extra `amount` / `price` field here is IGNORED on purpose.
-  // NOTE: `customer_key` is validated for schema-compat but NEVER trusted as
+  // NOTE: `customer_key` was a legacy field, removed in the Clerk migration;
   // the provider customerKey — that is derived from the authenticated user.
 }
 
@@ -58,28 +54,6 @@ function jsonResponse(body: unknown, status: number): Response {
 // A09: single structured (JSON-line) logger for auditable billing events.
 function logEvent(event: string, fields: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ event, timestamp: new Date().toISOString(), ...fields }));
-}
-
-async function verifyTurnstile(token: string, secretKey: string): Promise<boolean> {
-  // A10: 5s timeout + top-level catch so a hung Cloudflare call cannot stall us.
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TURNSTILE_TIMEOUT_MS);
-  try {
-    const res = await fetch(TURNSTILE_VERIFY_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ secret: secretKey, response: token }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) return false;
-    const data = await res.json() as { success?: boolean };
-    return data.success === true;
-  } catch (_err) {
-    logEvent('turnstile_error', { reason: 'fetch_failed_or_timeout' });
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 type PlanInterval = 'month' | 'year';
@@ -189,48 +163,44 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'invalid_body' }, 400);
   }
 
-  const { plan_id, customer_key, turnstile_token, auth_key } = body as Partial<BillingRequest>;
+  const { plan_id, auth_key } = body as Partial<BillingRequest>;
   if (!plan_id || typeof plan_id !== 'string') {
     return jsonResponse({ error: 'missing plan_id' }, 400);
-  }
-  if (!customer_key || typeof customer_key !== 'string') {
-    return jsonResponse({ error: 'missing customer_key' }, 400);
-  }
-  if (!turnstile_token || typeof turnstile_token !== 'string') {
-    return jsonResponse({ error: 'missing turnstile_token' }, 400);
   }
   if (!auth_key || typeof auth_key !== 'string') {
     return jsonResponse({ error: 'missing auth_key' }, 400);
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-
-  // A01/A07: authenticate the caller at the very top, BEFORE any side effect
-  // (Turnstile verify, Toss issuance, DB writes). No provider-side billing key
-  // can be produced for an unauthenticated request.
+  // A01/A07: authenticate the caller at the very top, BEFORE any side effect.
+  // Clerk's bot protection + a Clerk session JWT in the Authorization header
+  // are the only auth + bot gates we need. No Turnstile widget (Clerk handles
+  // it inline) and no Supabase session lookup.
   const authHeader = req.headers.get('authorization') ?? '';
-  const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
-    global: { headers: { authorization: authHeader } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data: userData } = await userClient.auth.getUser();
-  const userId = userData?.user?.id;
-  if (!userId) {
-    logEvent('billing_unauthenticated');
-    return jsonResponse({ error: 'unauthenticated' }, 401);
+  if (!authHeader.toLowerCase().startsWith('bearer ')) {
+    return jsonResponse({ error: 'missing_bearer_token' }, 401);
+  }
+  const token = authHeader.slice(7).trim();
+  const clerkSecret = Deno.env.get('CLERK_SECRET_KEY') ?? '';
+  if (!clerkSecret) {
+    return jsonResponse({ error: 'clerk_not_configured' }, 500);
+  }
+  let userId: string;
+  try {
+    const payload = await verifyToken(token, { secretKey: clerkSecret });
+    userId = payload.sub;
+    if (!userId) {
+      return jsonResponse({ error: 'unauthenticated' }, 401);
+    }
+  } catch (err) {
+    logEvent('billing_token_invalid', { detail: (err as Error)?.message ?? String(err) });
+    return jsonResponse({ error: 'invalid_token' }, 401);
   }
 
   // A01: the provider customerKey is derived from the authenticated user id.
-  // The request's `customer_key` is ignored so an attacker cannot register a
-  // billing key against another user's identity.
+  // The request body's `customer_key` field (if any) is ignored so an attacker
+  // cannot register a billing key against another user's identity.
   const customerKey = userId;
-
-  const turnstileSecret = Deno.env.get('TURNSTILE_SECRET_KEY') ?? '';
-  const turnstileOk = await verifyTurnstile(turnstile_token, turnstileSecret);
-  if (!turnstileOk) {
-    logEvent('turnstile_failed', { user_id: userId });
-    return jsonResponse({ error: 'turnstile_failed' }, 400);
-  }
 
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const supabase = createClient(supabaseUrl, serviceKey, {
