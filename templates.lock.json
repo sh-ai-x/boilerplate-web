@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "ref": "5a9dffeb18df49a6722a702efa40f1fcef67abc5",
+  "ref": "a3266d52b530bb9cacf10d4b510debc5eab8ca71",
   "source": "github:sh-ai-x/boilerplate-web",
   "templates": {
     "saas": "templates/saas",
@@ -10,9 +10,9 @@
   },
   "checksum_algorithm": "sha256",
   "checksums": {
-    "saas": "sha256:5a5f0480c7e7d1930b4ddf0485043106fe54e2cbe6ba4a5e286101eb5ded49b8",
-    "shop": "sha256:c37a8819efdbea4b2e4fad50d4e73cb9fbbd749968b3c6b06f49ef48abcaab4e",
-    "portfolio": "sha256:e3e727c225d78ff4045ab46db2a54494deb2b5a69ca0abaad19a47cc4ba6559a",
+    "saas": "sha256:1e3fc9ea750bc6f49527b8effc32a15355bddfe60431a7bb07c9b95e4f9f7376",
+    "shop": "sha256:07adaae9c4c707cd1f3411f24d21a21fbc1aad99c7280947c02520a1800d948b",
+    "portfolio": "sha256:964699eb75892f580d7a4af8e5ad411307093c508a0a9d51317503512bd182d2",
     "_shared": "sha256:4119128a052691a918fb041bf5eba49b5204b67b70b0170c3933a600e13ecf4c"
   },
   "notes": [
