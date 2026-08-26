@@ -41,9 +41,10 @@ async function fetchPlans(): Promise<FetchResult> {
       timestamp: new Date().toISOString(),
     };
     console.error('[pricing] fetchPlans failed:', event);
-    if (typeof process !== 'undefined' && typeof process.emit === 'function') {
-      process.emit('monitoringEvent', event);
-    }
+    // Mirror the event to stdout in dev for log-aggregator hooks (Vercel,
+    // Datadog, Sentry). No actual Node process.emit (process is not typed
+    // for arbitrary events in Next.js + @clerk/nextjs bundles).
+    console.warn('[pricing] monitoringEvent', JSON.stringify(event));
     return { kind: 'error', message: error.message };
   }
   if (!data || data.length === 0) {

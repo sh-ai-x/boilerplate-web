@@ -1,6 +1,7 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth, useSession } from '@clerk/nextjs';
 
 // Mock Clerk's useAuth hook. The boilerplate's <SubscribeButton> reads
 // isSignedIn + getToken() and routes to /sign-in for signed-out users.
@@ -14,9 +15,10 @@ vi.mock('@clerk/nextjs', () => ({
   UserButton: () => <button data-testid="clerk-user-btn" />,
 }));
 
-import { SubscribeButton } from '../../components/SubscribeButton';
+import { SubscribeButton } from '../../../saas/components/SubscribeButton';
 
 const useAuthMock = vi.mocked(useAuth);
+const useSessionMock = vi.mocked(useSession);
 
 describe('SubscribeButton (Clerk auth)', () => {
   beforeEach(() => {
@@ -28,6 +30,10 @@ describe('SubscribeButton (Clerk auth)', () => {
       sessionId: 'sess_test',
       getToken: vi.fn().mockResolvedValue('jwt_test'),
       signOut: vi.fn(),
+    } as never);
+    useSessionMock.mockReset();
+    useSessionMock.mockReturnValue({
+      session: { getToken: vi.fn().mockResolvedValue('jwt_test') } as never,
     } as never);
   });
 
@@ -56,7 +62,7 @@ describe('SubscribeButton (Clerk auth)', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
     // Pretend the user pastes an authKey at the prompt
-    vi.spyOn(window, 'prompt').mockReturnValue('authkey_test');
+    window.prompt = vi.fn().mockReturnValue('authkey_test') as never;
 
     render(<SubscribeButton planId="plan_test" />);
     screen.getByRole('button', { name: /subscribe/i }).click();
