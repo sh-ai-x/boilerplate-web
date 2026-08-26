@@ -15,7 +15,7 @@ vi.mock('@clerk/nextjs', () => ({
   UserButton: () => <button data-testid="clerk-user-btn" />,
 }));
 
-import { SubscribeButton } from '../../../saas/components/SubscribeButton';
+import { SubscribeButton } from '../../saas/components/SubscribeButton';
 
 const useAuthMock = vi.mocked(useAuth);
 const useSessionMock = vi.mocked(useSession);
