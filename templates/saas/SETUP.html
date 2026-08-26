@@ -18,11 +18,12 @@
     --warn: #d29922;
     --danger: #f85149;
     --code-fg: #c9d1d9;
+    --clerk: #6c47ff;
   }
   body { margin: 0; background: var(--bg); color: var(--fg); color-scheme: dark; font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   header { position: sticky; top: 0; background: var(--bg-elev); border-bottom: 1px solid var(--border); padding: 14px 28px; z-index: 10; display: flex; align-items: center; gap: 20px; }
-  header h1 { margin: 0; font-size: 19px; font-weight: 600; color: var(--fg); }
-  header h1 .brand { color: var(--accent); margin-right: 6px; font-family: ui-monospace, monospace; }
+  header h1 { margin: 0; font-size: 19px; font-weight: 600; }
+  header h1 .brand { color: var(--clerk); margin-right: 6px; font-family: ui-monospace, monospace; }
   .progress { flex: 1; max-width: 520px; }
   .progress-bar { background: var(--bg-code); border-radius: 999px; height: 6px; overflow: hidden; border: 1px solid var(--border); }
   .progress-bar > div { background: var(--accent); height: 100%; width: 0%; transition: width 0.25s ease; }
@@ -30,11 +31,13 @@
   main { max-width: 920px; margin: 0 auto; padding: 32px 28px 80px; }
   h1, h2 { color: var(--fg); }
   section.step { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 24px 28px; margin-bottom: 22px; position: relative; transition: opacity 0.2s, border-color 0.2s; }
-  section.step.completed { opacity: 0.5; border-color: var(--accent-2); }
+  section.step.completed { opacity: 0.65; border-color: var(--accent-2); }
   section.step.completed h2::before { background: var(--accent) !important; content: "OK" !important; }
-  section.step h2 { margin: 0 0 14px; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 12px; }
-  section.step h2::before { content: attr(data-num); display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: var(--accent-2); color: #0d1117; border-radius: 50%; font-size: 13px; font-weight: 700; font-family: ui-monospace, monospace; }
+  section.step h2 { margin: 0 0 14px; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  section.step h2::before { content: attr(data-num); display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: var(--accent-2); color: #0d1117; border-radius: 50%; font-size: 13px; font-weight: 700; font-family: ui-monospace, monospace; flex-shrink: 0; }
   section.step h2 .sub { color: var(--fg-muted); font-weight: 400; font-size: 0.83em; margin-left: 4px; }
+  section.step h2 .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--bg-code); border: 1px solid var(--border); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  section.step h2 .pill.clerk { color: var(--clerk); border-color: var(--clerk); }
   section.step p, section.step li { color: var(--fg); }
   pre { background: var(--bg-code); border: 1px solid var(--border); color: var(--code-fg); padding: 14px 18px 14px 16px; border-radius: 8px; overflow-x: auto; font: 13px/1.55 ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin: 10px 0; position: relative; white-space: pre; }
   pre button { position: absolute; top: 8px; right: 8px; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); border-radius: 5px; padding: 3px 10px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
@@ -46,8 +49,9 @@
   details summary { cursor: pointer; user-select: none; font-weight: 500; padding: 6px 0; color: var(--fg); }
   details summary:hover { color: var(--accent); }
   details[open] summary { color: var(--accent); }
-  .warn, .tip { background: var(--bg-code); border-left: 4px solid var(--warn); padding: 12px 16px; border-radius: 6px; margin: 14px 0; color: var(--fg); }
+  .warn, .tip, .note { background: var(--bg-code); border-left: 4px solid var(--warn); padding: 12px 16px; border-radius: 6px; margin: 14px 0; color: var(--fg); }
   .tip { border-left-color: var(--accent); }
+  .note { border-left-color: #58a6ff; }
   .warn b, .warn strong { color: var(--warn); }
   .tip b, .tip strong { color: var(--accent); }
   .check { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--bg-code); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; margin-top: 14px; transition: border-color 0.15s; }
@@ -62,110 +66,160 @@
   footer a { color: var(--accent); }
   .reset-btn { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; transition: all 0.15s; }
   .reset-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+  .grid > div { padding: 10px 12px; background: var(--bg-code); border: 1px solid var(--border); border-radius: 6px; }
+  .grid b { color: var(--accent); display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
 </style>
 </head>
 <body>
-<h1>saas - Setup &amp; Deploy Guide</h1>
-<p>Stay open in your browser while running these commands in another terminal.</p>
-<div class="progress"><div class="progress-bar"><div id="pf"></div></div></div>
+<header>
+  <h1><span class="brand">$</span>saas - Setup &amp; Deploy Guide</h1>
+  <div class="progress"><div class="progress-bar"><div id="pf"></div></div><div class="progress-text" id="pft">0 / 9 steps</div></div>
+  <button class="reset-btn" id="reset">reset progress</button>
+</header>
+
+<main>
+<p style="color:var(--fg-muted); margin-top:0;">Stay open in your browser while running these commands in another terminal.</p>
 
 <section class="step" id="step-0" data-step="0">
-<h2>Step 0 - Scaffold (one line)</h2>
+<h2>Step 0 - Scaffold <span class="sub">(one line)</span></h2>
 <pre><code>npx create-boilerplate-web ./my-saas --type=saas --yes --allow-unsafe-path --skip-install --deploy</code><button data-copy>copy</button></pre>
+<p>What this does: clones <code>templates/saas/</code> + <code>templates/_shared/</code>, writes <code>pnpm-workspace.yaml</code>, rewrites the project's <code>package.json</code> <code>"name"</code>.</p>
 <label class="check"><input type="checkbox" data-step-check="0">Done - scaffolded target exists</label>
 </section>
+
 <section class="step" id="step-1" data-step="1">
-<h2>Step 1 - Install deps (pnpm, not npm)</h2>
-<div class="warn">WARNING: Don't run npm install - fails with EUNSUPPORTEDPROTOCOL: workspace:*. This boilerplate uses pnpm workspaces.</div>
+<h2>Step 1 - Install deps <span class="pill">pnpm</span></h2>
+<div class="warn">WARNING: do not run <code>npm install</code>. The <code>workspace:*</code> protocol in package.json is pnpm-only - npm fails with <code>EUNSUPPORTEDPROTOCOL</code>.</div>
 <pre><code>cd ./my-saas
-npm install -g pnpm     # if you don't have pnpm (one-time)
+npm install -g pnpm     # if you don't have pnpm
 pnpm install</code><button data-copy>copy</button></pre>
-<label class="check"><input type="checkbox" data-step-check="1">Done - pnpm install completed</label>
+<label class="check"><input type="checkbox" data-step-check="1">Done - pnpm install exited 0</label>
 </section>
 
 <section class="step" id="step-2" data-step="2">
-<h2>Step 2 - Fill in .env.local (7 keys, 4 dashboards)</h2>
+<h2>Step 2 - Fill in .env.local <span class="sub">(3 services, 9 keys)</span></h2>
 <pre><code>cp .env.example .env.local
 $EDITOR .env.local</code><button data-copy>copy</button></pre>
-<details><summary>Where to get each key (4 dashboards)</summary>
-<ul>
-<li><b>Supabase</b>: dashboard -> new project -> Settings API + Settings General + Account Tokens</li>
-<li><b>Vercel</b>: signup with GitHub -> Account Settings for org id, account/tokens for token</li>
-<li><b>Cloudflare</b>: add domain -> Account ID + Zone ID, profile/api-tokens for zone-WAF token</li>
-<li><b>Toss</b>: tosspayments.com developer dashboard, API keys for Live Secret + Auth</li>
-</ul></details>
+<details><summary>Where to get each key (3 dashboards)</summary>
+<div class="grid">
+  <div><b>Clerk</b>dashboard.clerk.com -&gt; API Keys (3 keys) + Webhooks (1 secret)</div>
+  <div><b>Supabase</b>supabase.com/dashboard -&gt; Settings API + General + Account Tokens</div>
+  <div><b>Toss</b>tosspayments.com -&gt; developer dashboard -&gt; API keys</div>
+</div></details>
 <table><thead><tr><th>Key</th><th>Source</th></tr></thead><tbody>
-<tr><td><code>NEXT_PUBLIC_SUPABASE_URL</code></td><td>Supabase API Project URL</td></tr>
-<tr><td><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></td><td>Supabase API anon public</td></tr>
-<tr><td><code>SUPABASE_SERVICE_ROLE_KEY</code></td><td>Supabase API service_role</td></tr>
-<tr><td><code>NEXT_PUBLIC_TURNSTILE_SITE_KEY</code></td><td>Cloudflare
-<tr><td><code>TURNSTILE_SECRET_KEY</code></td><td>Cloudflare
-<tr><td><code>TOSS_SECRET_KEY</code></td><td>Toss API keys Live Secret</td></tr>
-<tr><td><code>TOSS_AUTH_KEY</code></td><td>Toss API keys Live Auth</td></tr>
-<tr><td><code>VERCEL_TOKEN</code></td><td>Vercel Tokens</td></tr>
-<tr><td><code>VERCEL_ORG_ID</code></td><td>Vercel Account Your ID</td></tr>
-<tr><td><code>CF_API_TOKEN</code></td><td>Cloudflare API Tokens (zone WAF scope)</td></tr>
-<tr><td><code>CF_ZONE_ID</code></td><td>Cloudflare zone Zone ID</td></tr>
-<tr><td><code>SUPABASE_ACCESS_TOKEN</code></td><td>Supabase Account Tokens (account-wide)</td></tr>
-<tr><td><code>SUPABASE_PROJECT_REF</code></td><td>Supabase Settings General Reference ID</td></tr>
+<tr><td><code>NEXT_PUBLIC_SUPABASE_URL</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; Project URL</td></tr>
+<tr><td><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; anon public</td></tr>
+<tr><td><code>SUPABASE_SERVICE_ROLE_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; service_role (server-only)</td></tr>
+<tr><td><code>NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY</code></td><td>Clerk &rarr; API Keys &rarr; Publishable key (starts <code>pk_test_</code>)</td></tr>
+<tr><td><code>CLERK_SECRET_KEY</code></td><td>Clerk &rarr; API Keys &rarr; Secret key (starts <code>sk_test_</code>)</td></tr>
+<tr><td><code>CLERK_WEBHOOK_SECRET</code></td><td>Clerk &rarr; Webhooks &rarr; endpoint signing secret (starts <code>whsec_</code>)</td></tr>
+<tr><td><code>TOSS_SECRET_KEY</code></td><td>Toss &rarr; developer &rarr; API keys &rarr; Live Secret</td></tr>
+<tr><td><code>TOSS_AUTH_KEY</code></td><td>Toss &rarr; developer &rarr; API keys &rarr; Live Auth</td></tr>
 </tbody></table>
-<p style="margin-top:12px; padding:10px 12px; background:var(--bg-code); border-left:3px solid var(--blue); border-radius:6px; color:var(--fg-muted); font-size:13px;">
-<strong style="color:var(--fg);">6 more secrets</strong> (VERCEL_TOKEN, VERCEL_ORG_ID, CF_API_TOKEN, CF_ZONE_ID, SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF) go into <strong>GitHub Actions secrets</strong> only - <code>./scripts/setup.sh</code> sets them automatically in Step 4. You do <strong>NOT</strong> edit them in <code>.env.local</code>.
-</p>
-<label class="check"><input type="checkbox" data-step-check="2">Done - 7 placeholders replaced with my actual values</label>
+<div class="tip"><b>Auto-fill:</b> if these env vars are in your shell, <code>./scripts/auto-fill-env.sh</code> writes them to <code>.env.local</code> for you:
+<pre><code>export NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_xxx"
+export CLERK_SECRET_KEY="sk_test_xxx"
+export NEXT_PUBLIC_SUPABASE_URL="https://xxx.supabase.co"
+export NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJ..."
+export SUPABASE_SERVICE_ROLE_KEY="eyJ..."
+export SUPABASE_ACCESS_TOKEN="sbp_xxx"
+export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
+<label class="check"><input type="checkbox" data-step-check="2">Done - 9 placeholders replaced</label>
 </section>
+
 <section class="step" id="step-3" data-step="3">
-<h2>Step 3 - Verify prereqs</h2>
-<pre><code>./scripts/setup.sh --check</code><button data-copy>copy</button></pre>
-<p>Should print: prereqs OK, run without --check to execute setup.</p>
-<label class="check"><input type="checkbox" data-step-check="3">Done - --check exits 0</label>
+<h2>Step 3 - Configure Clerk <span class="pill clerk">clerk</span></h2>
+<ol>
+<li><a href="https://dashboard.clerk.com" target="_blank" rel="noopener">dashboard.clerk.com</a> &rarr; <b>Create Application</b> (name: anything, enable Email + Google + GitHub).</li>
+<li><b>Copy API keys</b> (left nav: <i>API Keys</i>) into <code>.env.local</code> now if you haven't already.</li>
+<li><b>Configure sign-in paths</b> (left nav: <i>Account &amp; Sessions</i> &rarr; <i>Paths</i>):
+  <ul>
+    <li>Sign-in URL: <code>/sign-in</code></li>
+    <li>Sign-up URL: <code>/sign-up</code></li>
+    <li>After sign-in: <code>/</code></li>
+    <li>After sign-up: <code>/</code></li>
+  </ul>
+</li>
+<li><b>Create a webhook</b> (left nav: <i>Webhooks</i> &rarr; <i>Add Endpoint</i>):
+  <ul>
+    <li>URL: <code>https://&lt;your-deployed-domain&gt;/api/webhooks/clerk</code> (use a placeholder for now - you'll update after first deploy)</li>
+    <li>Events: tick <code>user.created</code>, <code>user.updated</code>, <code>user.deleted</code></li>
+    <li>Copy the <b>Signing Secret</b> (starts <code>whsec_</code>) into <code>CLERK_WEBHOOK_SECRET</code></li>
+  </ul>
+</li>
+</ol>
+<div class="note"><b>Test mode only:</b> Clerk's test keys (<code>pk_test_...</code>, <code>sk_test_...</code>) work without payment. For production, copy the live keys (<code>pk_live_</code>, <code>sk_live_</code>) when you go live.</div>
+<label class="check"><input type="checkbox" data-step-check="3">Done - Clerk app created + webhook signing secret pasted</label>
 </section>
 
 <section class="step" id="step-4" data-step="4">
-<h2>Step 4 - Run setup</h2>
-<pre><code>export GH_REPO_NAME=my-saas
-./scripts/setup.sh</code><button data-copy>copy</button></pre>
-<p>Does: supabase link + db push + functions deploy billing + git init/commit + gh repo create/push + gh secret set x7.</p>
-<label class="check"><input type="checkbox" data-step-check="4">Done - ok setup.sh finished.</label>
+<h2>Step 4 - Create Supabase project</h2>
+<ol>
+<li><a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com/dashboard</a> &rarr; <b>New Project</b>. Pick name + region. Save the DB password somewhere.</li>
+<li>From the project dashboard, copy 3 keys:
+  <ul>
+    <li><b>Settings &rarr; API &rarr; Project URL</b> &rarr; <code>NEXT_PUBLIC_SUPABASE_URL</code></li>
+    <li><b>anon public</b> &rarr; <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></li>
+    <li><b>service_role</b> &rarr; <code>SUPABASE_SERVICE_ROLE_KEY</code></li>
+  </ul>
+</li>
+<li>From <b>Settings &rarr; General</b>, copy the <b>Reference ID</b> (20-char slug in the URL) &rarr; this is your <code>SUPABASE_PROJECT_REF</code>.</li>
+<li>From <a href="https://supabase.com/dashboard/account/tokens" target="_blank" rel="noopener">account/tokens</a>, <b>Generate new token</b> (one per Supabase account, reusable across projects) &rarr; <code>SUPABASE_ACCESS_TOKEN</code>.</li>
+</ol>
+<label class="check"><input type="checkbox" data-step-check="4">Done - 5 Supabase values ready (3 URLs + ref + access token)</label>
 </section>
 
 <section class="step" id="step-5" data-step="5">
-<h2>Step 5 - Push to default branch (trigger first deploy)</h2>
-<p>If setup.sh already pushed (gh repo create --push), skip ahead. Otherwise:</p>
-<pre><code>git remote add origin https://github.com/&lt;OWNER&gt;/&lt;REPO&gt;.git
-git branch -M default-branch-name
-git push -u origin default-branch-name</code><button data-copy>copy</button></pre>
-<label class="check"><input type="checkbox" data-step-check="5">Done - first push landed on default branch</label>
+<h2>Step 5 - Cloudflare + Toss accounts</h2>
+<p>Two short sign-ups. Do them in parallel - both take &lt;2 min.</p>
+<div class="grid">
+  <div><b>Cloudflare</b><a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">sign-up</a> &rarr; add a domain (free plan OK) &rarr; note <b>Account ID</b> + <b>Zone ID</b></div>
+  <div><b>Toss</b><a href="https://tosspayments.com" target="_blank" rel="noopener">tosspayments.com</a> &rarr; sign up with corp info &rarr; developer dashboard &rarr; issue <b>Live Secret</b> + <b>Live Auth</b> keys</div>
+</div>
+<div class="tip"><b>Toss test mode</b>: use <code>_test_</code>-suffixed keys for development. Real cards still work in test mode - this only suppresses real-money capture.</div>
+<label class="check"><input type="checkbox" data-step-check="5">Done - CF Zone ID / Account ID noted, Toss Live keys pasted</label>
 </section>
+
 <section class="step" id="step-6" data-step="6">
-<h2>Step 6 - Watch first deploy</h2>
-<pre><code>gh run watch --repo "&lt;OWNER&gt;/&lt;REPO&gt;"</code><button data-copy>copy</button></pre>
-<p>3 jobs: deploy-shared (Vercel + CF Pages), supabase-functions (billing), cloudflare-waf.</p>
-<label class="check"><input type="checkbox" data-step-check="6">Done - 3 jobs green</label>
+<h2>Step 6 - Run setup <span class="sub">(one command)</span></h2>
+<div class="note">Will run <code>supabase link</code>, <code>supabase db push</code>, deploy the <code>billing</code> Edge Function, init git, push to GitHub, set 7 repo secrets.</div>
+<pre><code>export GH_REPO_NAME=my-saas
+./scripts/setup.sh --check    # verifies prereqs first (dry-run)
+./scripts/setup.sh            # actually does it</code><button data-copy>copy</button></pre>
+<div class="warn"><b>Pre-req:</b> <code>supabase login</code> + <code>gh auth login</code> must already have been done. Setup.sh aborts if either is missing.</div>
+<label class="check"><input type="checkbox" data-step-check="6">Done - setup.sh finished (last line: <code>ok setup.sh finished.</code>)</label>
 </section>
 
 <section class="step" id="step-7" data-step="7">
-<h2>Step 7 - Import Vercel project (one-time)</h2>
+<h2>Step 7 - Update Clerk webhook URL</h2>
+<p>You set a placeholder URL in Step 3. After the first deploy, you have a real domain. Update Clerk:</p>
 <ol>
-<li>vercel.com/dashboard</li>
-<li>Add New -&gt; Project</li>
-<li>Pick the repo</li>
-<li>Accept Next.js build settings</li>
-<li>Deploy</li>
+<li>Open <a href="https://dashboard.clerk.com" target="_blank" rel="noopener">dashboard.clerk.com</a> &rarr; <b>Webhooks</b> &rarr; your endpoint.</li>
+<li>Paste your Vercel URL + <code>/api/webhooks/clerk</code> &rarr; <b>Save</b>.</li>
+<li>Click <b>Send test event</b> &rarr; verify <code>200 OK</code> in the response.</li>
 </ol>
-<p>After deploy, verify with:</p>
-<pre><code>open "$(gh api repos/&lt;OWNER&gt;/&lt;REPO&gt; --jq .homepage)"</code><button data-copy>copy</button></pre>
-<label class="check"><input type="checkbox" data-step-check="7">Done - Vercel URL returns 200</label>
+<div class="tip">Tip: alternative is to use a tunnel service (<code>cloudflared tunnel</code> or <code>ngrok http 3000</code>) for local webhook testing before deploy.</div>
+<label class="check"><input type="checkbox" data-step-check="7">Done - Clerk webhook returns 200 on test event</label>
 </section>
 
 <section class="step" id="step-8" data-step="8">
-<h2>Step 8 - Verify Supabase + Cloudflare WAF</h2>
-<pre><code>supabase functions list --project-ref "$SUPABASE_PROJECT_REF"</code><button data-copy>copy</button></pre>
-<p>Cloudflare: dash.cloudflare.com -&gt; zone -&gt; Security -&gt; WAF -&gt; Custom Rules should show 6 rules.</p>
-<label class="check"><input type="checkbox" data-step-check="8">Done - billing deployed + 6 WAF rules visible</label>
+<h2>Step 8 - Watch first deploy</h2>
+<pre><code>gh run watch --repo "&lt;OWNER&gt;/&lt;REPO&gt;"</code><button data-copy>copy</button></pre>
+<p>4 jobs run in parallel:</p>
+<ul>
+<li><code>vercel-deploy</code> - Next.js build + push to Vercel</li>
+<li><code>cloudflare-pages-deploy</code> - alternate deploy target (skipped if <code>CF_API_TOKEN</code> is missing)</li>
+<li><code>supabase-functions</code> - deploys the <code>billing</code> Edge Function</li>
+<li><code>cloudflare-waf</code> - applies 6 WAF rules from <code>cloudflare-rules.json</code></li>
+</ul>
+<label class="check"><input type="checkbox" data-step-check="8">Done - all 4 jobs green + https://&lt;domain&gt;.vercel.app returns 200</label>
 </section>
 
-<footer>Generated by create-boilerplate-web phase 2-deploy-automation.</footer>
+<footer>
+Generated by <code>create-boilerplate-web</code> phase 2 + Clerk migration. Verified 2026-08-26.<br>
+Troubleshoot in <code>SETUP.md</code> &middot; CLAUDE.md is the project's source-of-truth.
+</footer>
 
 <script>
 const STORAGE_KEY = 'saas-setup-progress';
@@ -182,7 +236,9 @@ function updateUI() {
     else if (cb) { cb.checked = false; section && section.classList.remove('completed'); }
   }
   const pf = document.getElementById('pf');
+  const pft = document.getElementById('pft');
   if (pf) pf.style.width = (done / STEPS.length) * 100 + '%';
+  if (pft) pft.textContent = done + ' / ' + STEPS.length + ' steps';
 }
 for (const n of STEPS) {
   const cb = document.querySelector('input[data-step-check="' + n + '"]');
@@ -201,7 +257,8 @@ for (const btn of document.querySelectorAll('button[data-copy]')) {
     try {
       await navigator.clipboard.writeText(text);
       btn.textContent = 'copied';
-      setTimeout(function() { btn.textContent = 'copy'; }, 1500);
+      btn.classList.add('copied');
+      setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1500);
     } catch (e) {
       const range = document.createRange();
       range.selectNodeContents(code);
@@ -212,6 +269,12 @@ for (const btn of document.querySelectorAll('button[data-copy]')) {
     }
   });
 }
+document.getElementById('reset').addEventListener('click', function() {
+  if (confirm('Reset all step progress?')) {
+    localStorage.removeItem(STORAGE_KEY);
+    updateUI();
+  }
+});
 updateUI();
 </script>
 </body>

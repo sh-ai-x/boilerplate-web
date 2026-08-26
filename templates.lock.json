@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "ref": "926cde2243f499f885d82f65bea29c96cf49aa6a",
+  "ref": "cfcc675ce5b7c38786f3e89a41fe11412eccc1f3",
   "source": "github:sh-ai-x/boilerplate-web",
   "templates": {
     "saas": "templates/saas",
@@ -10,9 +10,10 @@
   },
   "checksum_algorithm": "sha256",
   "checksums": {
-    "saas": "sha256:54ec533c121b5d48569dfb8d3a0a538d61ede5737768ba1d605538c304c4469b",
+    "saas": "sha256:27228450906ea4bfe5812396794917765be8cc8b2a869ada42c2e0766a29ddd6",
     "shop": "sha256:5e75f3e65df33804334715a2ffa48bf4293ad6cd20f39e553ac8ca14ab8e55b8",
-    "portfolio": "sha256:88758e96e156227e176735351b42fc0654ca9512a416c2b37e37e67b551d9717"
+    "portfolio": "sha256:88758e96e156227e176735351b42fc0654ca9512a416c2b37e37e67b551d9717",
+    "_shared": "sha256:4119128a052691a918fb041bf5eba49b5204b67b70b0170c3933a600e13ecf4c"
   },
   "notes": [
     "ref MUST be an immutable commit SHA, not a tag or branch. Tags can be re-pointed.",
@@ -22,5 +23,5 @@
     "2026-08-24: source flipped from github:sanghee-dev/boilerplate-web (HTTP 404, dead) to sh-ai-x/boilerplate-web (the actual canonical home).",
     "2026-08-24: added templates._shared (so the CLI can degit the shared package into the scaffolded target; the saas/shop/portfolio templates reference @boilerplate-web/shared via workspace:*)"
   ],
-  "updated_at": "2026-08-24T00:00:00Z"
+  "updated_at": "2026-08-26T00:00:00Z"
 }

@@ -73,10 +73,12 @@ function buildSrc(type) {
   if (!validateType(type)) {
     throw new Error(`Invalid --type "${type}"`);
   }
-  // github:<repo>#<sha>/<subdir-from-lockfile>
+  // github:<repo>#<sha>#<subdir-from-lockfile>
+  // Format compatible with degit 3.x (which uses # as both the repo-SHA
+  // and SHA-subdir separator; /  is NOT supported as a subdir separator).
   // The subdir comes from the lockfile, NOT hardcoded. This is the lockfile
   // SSOT claim (review nit).
-  return `${lock.source}#${lock.ref}/${lock.templates[type]}`;
+  return `${lock.source}#${lock.ref}#${lock.templates[type]}`;
 }
 
 // Verify a package.json's SHA-256 against the lockfile manifest for `type`.
@@ -283,6 +285,18 @@ function copyDirSync(src, dest, opts = {}) {
 // This helper is called from BOTH paths. It's best-effort: a failure
 // logs a warning to stderr with the manual recovery command (the user
 // can run `npx degit ...` themselves) but does NOT fail the scaffold.
+// Phase 2-deploy-automation: every consumer template (saas/shop/portfolio)
+// references `@boilerplate-web/shared` via `workspace:*`. Both the local
+// fast path AND the degit path must scaffold the shared package and write
+// pnpm-workspace.yaml. Without it, `pnpm install` fails with
+// `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND`.
+//
+// Implementation note: degit 3.x's subdirectory extraction only works for
+// the repo's DEFAULT BRANCH. The `repo#sha/subdir` and `repo#sha#subdir`
+// forms either fail or silently extract the WHOLE repo at the SHA. We
+// therefore download the tarball from codeload.github.com directly and
+// extract `<repo>-<short>/<subdir>/` ourselves. This gives us a SHA-pinned
+// subdir extraction without depending on degit's quirky parser.
 function scaffoldShared(targetFolder) {
   const pathMod = require('path');
   const fsMod = require('fs');
@@ -293,119 +307,93 @@ function scaffoldShared(targetFolder) {
   const sharedDir = lock.templates._shared;
   if (!sharedDir) return Promise.resolve();
   const sharedTarget = pathMod.join(targetFolder, '_shared');
-  const sharedSrc = lock.source + '#' + lock.ref + '/' + sharedDir;
 
-  let sharedDegit = null;
-  try {
-    const required = require('degit');
-    sharedDegit = (required && typeof required.default === 'function') ? required.default : required;
-  } catch (_) {}
-  if (!sharedDegit) {
-    try {
-      let dir = __dirname;
-      for (let i = 0; i < 10; i++) {
-        const candidate = pathMod.join(dir, 'node_modules', 'degit');
-        if (fsMod.existsSync(candidate)) {
-          const required = require(candidate);
-          sharedDegit = (required && typeof required.default === 'function') ? required.default : required;
-          break;
-        }
-        const parent = pathMod.dirname(dir);
-        if (parent === dir) break;
-        dir = parent;
-      }
-    } catch (_) {}
+  // Parse `github:<repo>` from lock.source for the codeload URL.
+  const m = String(lock.source).match(/^github:([^#]+)$/);
+  if (!m) {
+    process.stderr.write(
+      'Warning: cannot scaffold _shared/ - lockfile source is not github:<repo> (' + lock.source + ').\n'
+    );
+    return Promise.resolve();
   }
-  if (!sharedDegit) {
-    sharedDegit = function (src, opts) {
-      return {
-        clone: function (dest) {
-          const m = String(src).match(/^github:([^#]+)#([^/]+)(?:\/(.+))?$/);
-          if (!m) throw new Error('cannot scaffold non-github source: ' + src);
-          const repo = m[1];
-          const ref = m[2];
-          const subpath = m[3];
-          const tar = new Promise(function (resolve, reject) {
-            const fetch = function (url) {
-              httpsMod.get(url, function (res) {
-                if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                  fetch(res.headers.location); res.resume(); return;
-                }
-                if (res.statusCode !== 200) { reject(new Error('codeload HTTP ' + res.statusCode)); return; }
-                const chunks = [];
-                res.on('data', function (c) { chunks.push(c); });
-                res.on('end', function () { resolve(Buffer.concat(chunks)); });
-                res.on('error', reject);
-              }).on('error', reject);
-            };
-            fetch('https://codeload.github.com/' + repo + '/tar.gz/' + ref);
-          });
-          return tar.then(function (tarBuf) {
-            // Extract the tarball to a tmp subdir so the dir itself doesn't
-            // appear in readdirSync (we'd otherwise see the tar file + the
-            // extracted dir + nested files, breaking the "1 item" check).
-            const tmpRoot = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'cbw-shared-'));
-            const tmpTar = pathMod.join(tmpRoot, 'repo.tar');
-            const extractDir = pathMod.join(tmpRoot, 'extracted');
-            fsMod.mkdirSync(extractDir);
-            fsMod.writeFileSync(tmpTar, tarBuf);
-            childProcess.execFileSync('tar', ['-xzf', tmpTar, '-C', extractDir]);
-            fsMod.unlinkSync(tmpTar);
-            // GitHub tarballs have a single top-level dir like
-            // 'boilerplate-web-<short-sha>/'. The subpath (if any) is relative
-            // to that inner dir.
-            const innerItems = fsMod.readdirSync(extractDir);
-            if (innerItems.length === 1 && fsMod.statSync(pathMod.join(extractDir, innerItems[0])).isDirectory()) {
-              const source = pathMod.join(extractDir, innerItems[0], subpath || '.');
-              if (fsMod.existsSync(source)) {
-                fsMod.mkdirSync(dest, { recursive: true });
-                // Use cp + rm (mv across filesystems can fail on macOS)
-                // cp -R with trailing /. has been seen to be unreliable on
-                // macOS for some path layouts (creates an extra dir). Use rsync
-                // for portability. If rsync isn't available, fall back to mv
-                // (requires the inner dir to be in the same filesystem as dest,
-                // which is true here since /tmp is local).
-                if (fsMod.existsSync(pathMod.join(source, '.DS_Store'))) {
-                  // has dotfiles, just rsync -a
-                }
-                try {
-                  childProcess.execFileSync('rsync', ['-a', source + '/.', dest + '/'], { stdio: 'pipe' });
-                } catch (_) {
-                  // Fallback: cp -R (last resort)
-                  childProcess.execFileSync('cp', ['-R', source + '/.', dest + '/']);
-                }
-              } else {
-                process.stderr.write('Warning: subpath ' + subpath + ' not found in ' + repo + '@' + ref + '\n');
-              }
-            } else {
-              process.stderr.write('Warning: unexpected tarball structure from ' + repo + '@' + ref + ' (items=' + innerItems.length + ')\n');
-            }
-            childProcess.execFileSync('rm', ['-rf', tmpRoot]);
-          });
-        }
-      };
+  const repo = m[1];
+  const ref = lock.ref;
+  const tarUrl = 'https://codeload.github.com/' + repo + '/tar.gz/' + ref;
+
+  return new Promise(function (resolve, reject) {
+    const fetchTarball = function (url) {
+      return new Promise(function (res, rej) {
+        const req = httpsMod.get(url, function (r) {
+          if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+            r.resume();
+            fetchTarball(r.headers.location).then(res, rej);
+            return;
+          }
+          if (r.statusCode !== 200) {
+            r.resume();
+            rej(new Error('codeload HTTP ' + r.statusCode + ' for ' + repo + '@' + ref));
+            return;
+          }
+          const chunks = [];
+          r.on('data', function (c) { chunks.push(c); });
+          r.on('end', function () { res(Buffer.concat(chunks)); });
+          r.on('error', rej);
+        });
+        req.on('error', rej);
+      });
     };
-  }
 
-  return sharedDegit(sharedSrc, { cache: false, force: true, verbose: false }).clone(sharedTarget)
-    .then(function () {
-      const wsYaml = [
-        '# Auto-generated by create-boilerplate-web (phase 2-deploy-automation).',
-        '# The user template references @boilerplate-web/shared via workspace:*,',
-        '# so we ship a 2-package workspace: the main template + _shared.',
-        'packages:',
-        '  - .',
-        '  - _shared',
-        '',
-      ].join('\n');
-      fsMod.writeFileSync(pathMod.join(targetFolder, 'pnpm-workspace.yaml'), wsYaml);
-    })
-    .catch(function (sharedErr) {
-      process.stderr.write(
-        'Warning: could not scaffold _shared/ (' + sharedErr.message + '). ' +
-        'Run `npx degit "' + sharedSrc + '" _shared` in the target dir.\n'
-      );
-    });
+    fetchTarball(tarUrl).then(function (tarBuf) {
+      // Extract to a tmp dir so the tarball itself doesn't appear in
+      // readdirSync of the target.
+      const tmpRoot = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'cbw-shared-'));
+      try {
+        const tmpTar = pathMod.join(tmpRoot, 'repo.tar');
+        const extractDir = pathMod.join(tmpRoot, 'extracted');
+        fsMod.mkdirSync(extractDir);
+        fsMod.writeFileSync(tmpTar, tarBuf);
+        childProcess.execFileSync('tar', ['-xzf', tmpTar, '-C', extractDir]);
+        fsMod.unlinkSync(tmpTar);
+        // GitHub tarballs have a single top-level dir like
+        // 'boilerplate-web-<short-sha>/'. Subdir is relative to that.
+        const innerItems = fsMod.readdirSync(extractDir);
+        if (innerItems.length !== 1) {
+          throw new Error('unexpected tarball structure (items=' + innerItems.length + ')');
+        }
+        const topLevel = innerItems[0];
+        const source = pathMod.join(extractDir, topLevel, sharedDir);
+        if (!fsMod.existsSync(source)) {
+          throw new Error('subdir ' + sharedDir + ' not found in ' + repo + '@' + ref);
+        }
+        fsMod.mkdirSync(sharedTarget, { recursive: true });
+        try {
+          childProcess.execFileSync('rsync', ['-a', source + '/.', sharedTarget + '/'], { stdio: 'pipe' });
+        } catch (_) {
+          childProcess.execFileSync('cp', ['-R', source + '/.', sharedTarget + '/']);
+        }
+        const wsYaml = [
+          '# Auto-generated by create-boilerplate-web (phase 2-deploy-automation).',
+          '# The user template references @boilerplate-web/shared via workspace:*,',
+          '# so we ship a 2-package workspace: the main template + _shared.',
+          'packages:',
+          '  - .',
+          '  - _shared',
+          '',
+        ].join('\n');
+        fsMod.writeFileSync(pathMod.join(targetFolder, 'pnpm-workspace.yaml'), wsYaml);
+        resolve();
+      } catch (e) {
+        reject(e);
+      } finally {
+        try { childProcess.execFileSync('rm', ['-rf', tmpRoot]); } catch (_) {}
+      }
+    }, reject);
+  }).catch(function (sharedErr) {
+    process.stderr.write(
+      'Warning: could not scaffold _shared/ (' + sharedErr.message + '). ' +
+      'Run `npx degit "github:' + repo + '#' + ref + '#' + sharedDir + '" _shared` in the target dir.\n'
+    );
+  });
 }
 
 function downloadTemplate(type, targetFolder, opts = {}) {
@@ -526,7 +514,8 @@ function downloadTemplate(type, targetFolder, opts = {}) {
       const sharedDir = getLock().templates._shared;
       if (sharedDir) {
         const sharedTarget = path.join(resolvedTarget, '_shared');
-        const sharedSrc = lock.source + '#' + lock.ref + '/' + sharedDir;
+        // degit 3.x: subdir separator is '#', not '/'.
+  const sharedSrc = lock.source + '#' + lock.ref + '#' + sharedDir;
         try {
           const sharedEmitter = degit(sharedSrc, { cache: false, force, verbose: false });
           await sharedEmitter.clone(sharedTarget);
