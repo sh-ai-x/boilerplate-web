@@ -10,9 +10,9 @@
   },
   "checksum_algorithm": "sha256",
   "checksums": {
-    "saas": "sha256:27228450906ea4bfe5812396794917765be8cc8b2a869ada42c2e0766a29ddd6",
-    "shop": "sha256:5e75f3e65df33804334715a2ffa48bf4293ad6cd20f39e553ac8ca14ab8e55b8",
-    "portfolio": "sha256:88758e96e156227e176735351b42fc0654ca9512a416c2b37e37e67b551d9717",
+    "saas": "sha256:5a5f0480c7e7d1930b4ddf0485043106fe54e2cbe6ba4a5e286101eb5ded49b8",
+    "shop": "sha256:c37a8819efdbea4b2e4fad50d4e73cb9fbbd749968b3c6b06f49ef48abcaab4e",
+    "portfolio": "sha256:e3e727c225d78ff4045ab46db2a54494deb2b5a69ca0abaad19a47cc4ba6559a",
     "_shared": "sha256:4119128a052691a918fb041bf5eba49b5204b67b70b0170c3933a600e13ecf4c"
   },
   "notes": [
