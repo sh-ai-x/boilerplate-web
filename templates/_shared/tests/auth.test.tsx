@@ -53,7 +53,7 @@ describe('SubscribeButton (Clerk auth)', () => {
 
   it('renders a Subscribe button when signed in', () => {
     render(<SubscribeButton planId="plan_test" />);
-    expect(screen.getByRole('button', { name: 'Subscribe', exact: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Subscribe$/ })).toBeTruthy();
   });
 
   it('fetches the billing endpoint with the Clerk session JWT', async () => {
@@ -66,7 +66,7 @@ describe('SubscribeButton (Clerk auth)', () => {
     window.prompt = vi.fn().mockReturnValue('authkey_test') as never;
 
     render(<SubscribeButton planId="plan_test" />);
-    screen.getByRole('button', { name: 'Subscribe', exact: true }).click();
+    screen.getByRole('button', { name: /^Subscribe$/ }).click();
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
