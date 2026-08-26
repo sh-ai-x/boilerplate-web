@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useAuth, useSession, useUser } from '@clerk/nextjs';
 
 interface SubscribeButtonProps {
