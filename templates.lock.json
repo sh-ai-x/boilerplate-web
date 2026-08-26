@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "ref": "5a2042aa43dd2890e9457774c5d7f95822ef5c23",
+  "ref": "a0bb18a5c6bb43f0ce9f2dfa133e2172fd980f8d",
   "source": "github:sh-ai-x/boilerplate-web",
   "templates": {
     "saas": "templates/saas",
