@@ -15,7 +15,7 @@ export default async function GuestbookPage() {
   try {
     const c = cookies();
     const s = createServerSupabase({ get: (n) => c.get(n), set: (n, v, o) => c.set(n, v, o as never) });
-    const { data: { user } } = await s.auth.getUser();
+    const { data: { user } = { user: null } } = await s.auth.getUser() ?? { data: { user: null } };
     if (user) { isAuthed = true; currentUserId = user.id; }
   } catch (_) {}
 

@@ -11,6 +11,7 @@ const { formatPostInstallChecklist, formatDeploySecretHints } = require('./lib/p
 const { assertSafeTarget, revalidateBeforeWrite } = require('./lib/path-safety');
 const { installDeps } = require('./lib/install-deps');
 const { runPipeline } = require('./lib/pipeline');
+const { gateAdapters } = require('./lib/adapter-gate');
 
 async function main() {
   // --help / --version short-circuit so the user can run them without a target.
@@ -38,6 +39,9 @@ async function main() {
     deploy,
     openSetupGuide,
     deprecation,
+    auth,
+    db,
+    deployTarget,
   } = parseArgs(process.argv);
 
   if (!targetFolder) {
@@ -95,6 +99,25 @@ async function main() {
     // - e.g. the CI e2e scaffold test uses /tmp/cbw-test-<type>).
     async () => {
       await downloadTemplate(type, safeTarget, { force: overwrite });
+    },
+    // Adapter gate: filter files per `--auth / --db / --deploy-target` and
+    // write `.boilerplate.json` so the runtime adapter factories can read
+    // the chosen backend at boot. (plan section 5.2-5.3)
+    async () => {
+      const { removed, configPath } = gateAdapters(safeTarget, {
+        type,
+        auth,
+        db,
+        deployTarget,
+      });
+      if (removed.length > 0) {
+        process.stdout.write(
+          `[adapter-gate] removed ${removed.length} file(s) for ${auth}/${db}/${deployTarget}:\n` +
+            removed.map((p) => '  - ' + p).join('\n') +
+            '\n',
+        );
+      }
+      process.stdout.write(`[adapter-gate] wrote ${configPath}\n`);
     },
     async () => {
       const newName = rewritePackageName(safeTarget);

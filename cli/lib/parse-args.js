@@ -1,6 +1,10 @@
 'use strict';
 
-const USAGE = `Usage: create-boilerplate-web <targetFolder> --type=<saas|shop|portfolio> [--overwrite] [--yes] [--allow-unsafe-path] [--force (deprecated alias)] [--allow-scripts] [--skip-install] [--deploy] [--deploy] [--open-setup-guide]`;
+const USAGE = `Usage: create-boilerplate-web <targetFolder> --type=<saas|shop|portfolio> [--overwrite] [--yes] [--allow-unsafe-path] [--force (deprecated alias)] [--allow-scripts] [--skip-install] [--deploy] [--auth=<clerk|none>] [--db=<supabase|neon>] [--deploy-target=<vercel|none>] [--open-setup-guide]`;
+
+const VALID_AUTH = new Set(['clerk', 'none']);
+const VALID_DB = new Set(['supabase', 'neon']);
+const VALID_DEPLOY = new Set(['vercel', 'none']);
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -14,6 +18,10 @@ function parseArgs(argv) {
   let skipInstall = false;
   let deploy = false;
   let openSetupGuide = false;
+  // Adapter selections (plan section 5.1). Defaults preserve today's behavior.
+  let auth = 'clerk';
+  let db = 'supabase';
+  let deployTarget = 'vercel';
 
   for (const arg of args.slice(1)) {
     if (arg.startsWith('--type=')) {
@@ -49,6 +57,27 @@ function parseArgs(argv) {
     if (arg === '--deploy') {
       if (deploy) throw new Error(`--deploy specified more than once`);
       deploy = true;
+    }
+    if (arg.startsWith('--auth=')) {
+      const value = arg.slice('--auth='.length);
+      if (!VALID_AUTH.has(value)) {
+        throw new Error(`--auth must be one of: ${Array.from(VALID_AUTH).join(', ')} (got "${value}")`);
+      }
+      auth = value;
+    }
+    if (arg.startsWith('--db=')) {
+      const value = arg.slice('--db='.length);
+      if (!VALID_DB.has(value)) {
+        throw new Error(`--db must be one of: ${Array.from(VALID_DB).join(', ')} (got "${value}")`);
+      }
+      db = value;
+    }
+    if (arg.startsWith('--deploy-target=')) {
+      const value = arg.slice('--deploy-target='.length);
+      if (!VALID_DEPLOY.has(value)) {
+        throw new Error(`--deploy-target must be one of: ${Array.from(VALID_DEPLOY).join(', ')} (got "${value}")`);
+      }
+      deployTarget = value;
     }
   }
 
@@ -86,7 +115,10 @@ function parseArgs(argv) {
     deploy,
     openSetupGuide,
     deprecation,
+    auth,
+    db,
+    deployTarget,
   };
 }
 
-module.exports = { parseArgs, USAGE };
+module.exports = { parseArgs, USAGE, VALID_AUTH, VALID_DB, VALID_DEPLOY };

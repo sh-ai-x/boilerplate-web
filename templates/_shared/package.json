@@ -9,7 +9,9 @@
     "./supabase": "./supabase/client.ts",
     "./auth": "./auth/index.ts",
     "./components": "./components/index.ts",
-    "./env": "./env.ts"
+    "./env": "./env.ts",
+    "./adapters/auth": "./adapters/auth/index.ts",
+    "./adapters/db": "./adapters/db/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
@@ -18,9 +20,12 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4"
   },
   "devDependencies": {
+    "@clerk/nextjs": "^6.12.0",
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.1",
     "@types/node": "^22.5.5",
@@ -34,6 +39,7 @@
     "vitest": "^2.1.2"
   },
   "peerDependencies": {
+    "@clerk/nextjs": "^6.12.0",
     "next": "^14.2.0",
     "react": "^18.0.0"
   },

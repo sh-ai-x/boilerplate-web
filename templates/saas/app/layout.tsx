@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { ClerkProvider } from '@clerk/nextjs';
+import { getAuthAdapter } from '@boilerplate-web/shared/adapters/auth';
 import { Inter } from 'next/font/google';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -14,11 +14,16 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // AuthAdapter.Provider wraps the tree with the chosen backend's auth context
+  // (Clerk's ClerkProvider when --auth=clerk, identity passthrough when
+  // --auth=none). See plan section 6.1.
+  const auth = getAuthAdapter();
+  const Provider = auth.Provider;
   return (
-    <ClerkProvider>
+    <Provider>
       <html lang="en">
         <body className={inter.className}>{children}</body>
       </html>
-    </ClerkProvider>
+    </Provider>
   );
 }

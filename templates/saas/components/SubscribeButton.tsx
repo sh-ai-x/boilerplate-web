@@ -1,20 +1,24 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useAuth, useSession, useUser } from '@clerk/nextjs';
+import { getAuthAdapter } from '@boilerplate-web/shared/adapters/auth';
 
 interface SubscribeButtonProps {
   planId: string;
 }
 
 export function SubscribeButton({ planId }: SubscribeButtonProps) {
-  const { isSignedIn, isLoaded } = useAuth();
-  const { session } = useSession();
+  // AuthAdapter hooks: useUser() returns { user, isLoaded } (mirrors Clerk's
+  // useUser); useToken() returns a stable function that resolves to the
+  // current session token. For NoAuthAdapter, both return null/false.
+  const auth = getAuthAdapter();
+  const { user, isLoaded } = auth.useUser();
+  const getToken = auth.useToken();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  if (isLoaded && !isSignedIn) {
+  if (isLoaded && !user) {
     return (
       <a href="/sign-in">
         <button type="button">Sign in to subscribe</button>
@@ -30,7 +34,7 @@ export function SubscribeButton({ planId }: SubscribeButtonProps) {
       // A01: the Edge Function verifies the Clerk session JWT itself
       // (see billing/index.ts: verifyToken). The browser just forwards
       // the session token.
-      const token = await session?.getToken();
+      const token = await getToken();
       if (!token) {
         setError('Please sign in again.');
         setSubmitting(false);
