@@ -11,13 +11,19 @@ REPO_ROOT = Path(__file__).parent.parent
 SETUP_HTML = REPO_ROOT / "templates" / "saas" / "SETUP.html"
 
 EXPECTED_ENV_VARS = [
+    # Supabase (DB + Edge Functions) — 2025+ key names
     "NEXT_PUBLIC_SUPABASE_URL",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
-    "TURNSTILE_SECRET_KEY",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_SECRET_KEY",
+    "SUPABASE_JWKS_URL",
+    # Clerk (auth — replaces Turnstile/email+OAuth)
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    "CLERK_SECRET_KEY",
+    "CLERK_WEBHOOK_SECRET",
+    # Toss (billing)
     "TOSS_SECRET_KEY",
     "TOSS_AUTH_KEY",
+    # Vercel + Cloudflare + Supabase deploy secrets
     "VERCEL_TOKEN",
     "VERCEL_ORG_ID",
     "CF_API_TOKEN",

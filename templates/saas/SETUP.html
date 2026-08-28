@@ -109,27 +109,35 @@ $EDITOR .env.local</code><button data-copy>copy</button></pre>
 </div></details>
 <table><thead><tr><th>Key</th><th>Source</th></tr></thead><tbody>
 <tr><td><code>NEXT_PUBLIC_SUPABASE_URL</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; Project URL</td></tr>
-<tr><td><code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; anon public</td></tr>
-<tr><td><code>SUPABASE_SERVICE_ROLE_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; service_role (server-only)</td></tr>
+<tr><td><code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; Publishable key (starts <code>sb_publishable_</code>)</td></tr>
+<tr><td><code>SUPABASE_SECRET_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; Secret key, server-only (starts <code>sb_secret_</code>)</td></tr>
+<tr><td><code>SUPABASE_JWKS_URL</code></td><td>Supabase &rarr; Auth &rarr; Sign In/Up &rarr; Third Party Auth &rarr; Add provider (Clerk) &rarr; JWKS URL</td></tr>
 <tr><td><code>NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY</code></td><td>Clerk &rarr; API Keys &rarr; Publishable key (starts <code>pk_test_</code>)</td></tr>
 <tr><td><code>CLERK_SECRET_KEY</code></td><td>Clerk &rarr; API Keys &rarr; Secret key (starts <code>sk_test_</code>)</td></tr>
 <tr><td><code>CLERK_WEBHOOK_SECRET</code></td><td>Clerk &rarr; Webhooks &rarr; endpoint signing secret (starts <code>whsec_</code>)</td></tr>
 <tr><td><code>TOSS_SECRET_KEY</code></td><td>Toss &rarr; developer &rarr; API keys &rarr; Live Secret</td></tr>
 <tr><td><code>TOSS_AUTH_KEY</code></td><td>Toss &rarr; developer &rarr; API keys &rarr; Live Auth</td></tr>
+<tr><td><code>VERCEL_TOKEN</code></td><td>Vercel &rarr; Account Settings &rarr; Tokens &rarr; Create Token (GitHub deploy scope)</td></tr>
+<tr><td><code>VERCEL_ORG_ID</code></td><td>Vercel &rarr; Account Settings &rarr; General &rarr; Your ID</td></tr>
+<tr><td><code>CF_API_TOKEN</code></td><td>Cloudflare &rarr; My Profile &rarr; API Tokens &rarr; Create Token (Edit zone WAF template)</td></tr>
+<tr><td><code>CF_ZONE_ID</code></td><td>Cloudflare &rarr; domain overview &rarr; right column &rarr; Zone ID</td></tr>
+<tr><td><code>SUPABASE_ACCESS_TOKEN</code></td><td>Supabase &rarr; account/tokens &rarr; Generate new token</td></tr>
+<tr><td><code>SUPABASE_PROJECT_REF</code></td><td>Supabase &rarr; project &rarr; Settings &rarr; General &rarr; Reference ID (20-char slug in URL)</td></tr>
 </tbody></table>
 <div class="tip"><b>Auto-fill:</b> if these env vars are in your shell, <code>./scripts/auto-fill-env.sh</code> writes them to <code>.env.local</code> for you:
 <pre><code>export NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_xxx"
 export CLERK_SECRET_KEY="sk_test_xxx"
 export NEXT_PUBLIC_SUPABASE_URL="https://xxx.supabase.co"
-export NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJ..."
-export SUPABASE_SERVICE_ROLE_KEY="eyJ..."
+export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="sb_publishable_xxx"
+export SUPABASE_SECRET_KEY="sb_secret_xxx"
 export SUPABASE_ACCESS_TOKEN="sbp_xxx"
 export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
-<label class="check"><input type="checkbox" data-step-check="2">Done - 9 placeholders replaced</label>
+<label class="check"><input type="checkbox" data-step-check="2">Done - 9 values pasted</label>
 </section>
 
 <section class="step" id="step-3" data-step="3">
 <h2>Step 3 - Configure Clerk <span class="pill clerk">clerk</span></h2>
+<pre><code>dashboard.clerk.com -&gt; API Keys (left nav)<button data-copy>copy</button></code></pre>
 <ol>
 <li><a href="https://dashboard.clerk.com" target="_blank" rel="noopener">dashboard.clerk.com</a> &rarr; <b>Create Application</b> (name: anything, enable Email + Google + GitHub).</li>
 <li><b>Copy API keys</b> (left nav: <i>API Keys</i>) into <code>.env.local</code> now if you haven't already.</li>
@@ -143,7 +151,7 @@ export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
 </li>
 <li><b>Create a webhook</b> (left nav: <i>Webhooks</i> &rarr; <i>Add Endpoint</i>):
   <ul>
-    <li>URL: <code>https://&lt;your-deployed-domain&gt;/api/webhooks/clerk</code> (use a placeholder for now - you'll update after first deploy)</li>
+    <li>URL: <code>https://&lt;your-deployed-domain&gt;/api/webhooks/clerk</code> (use a temporary URL - you'll update after first deploy)</li>
     <li>Events: tick <code>user.created</code>, <code>user.updated</code>, <code>user.deleted</code></li>
     <li>Copy the <b>Signing Secret</b> (starts <code>whsec_</code>) into <code>CLERK_WEBHOOK_SECRET</code></li>
   </ul>
@@ -155,13 +163,14 @@ export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
 
 <section class="step" id="step-4" data-step="4">
 <h2>Step 4 - Create Supabase project</h2>
+<pre><code>supabase.com/dashboard -&gt; New Project<button data-copy>copy</button></code></pre>
 <ol>
 <li><a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com/dashboard</a> &rarr; <b>New Project</b>. Pick name + region. Save the DB password somewhere.</li>
 <li>From the project dashboard, copy 3 keys:
   <ul>
     <li><b>Settings &rarr; API &rarr; Project URL</b> &rarr; <code>NEXT_PUBLIC_SUPABASE_URL</code></li>
-    <li><b>anon public</b> &rarr; <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code></li>
-    <li><b>service_role</b> &rarr; <code>SUPABASE_SERVICE_ROLE_KEY</code></li>
+    <li><b>Publishable key</b> (starts <code>sb_publishable_</code>) &rarr; <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code></li>
+    <li><b>Secret key</b> (starts <code>sb_secret_</code>, server-only) &rarr; <code>SUPABASE_SECRET_KEY</code></li>
   </ul>
 </li>
 <li>From <b>Settings &rarr; General</b>, copy the <b>Reference ID</b> (20-char slug in the URL) &rarr; this is your <code>SUPABASE_PROJECT_REF</code>.</li>
@@ -172,6 +181,7 @@ export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
 
 <section class="step" id="step-5" data-step="5">
 <h2>Step 5 - Cloudflare + Toss accounts</h2>
+<pre><code>dash.cloudflare.com/sign-up AND tosspayments.com<button data-copy>copy</button></code></pre>
 <p>Two short sign-ups. Do them in parallel - both take &lt;2 min.</p>
 <div class="grid">
   <div><b>Cloudflare</b><a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">sign-up</a> &rarr; add a domain (free plan OK) &rarr; note <b>Account ID</b> + <b>Zone ID</b></div>
@@ -193,7 +203,8 @@ export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
 
 <section class="step" id="step-7" data-step="7">
 <h2>Step 7 - Update Clerk webhook URL</h2>
-<p>You set a placeholder URL in Step 3. After the first deploy, you have a real domain. Update Clerk:</p>
+<pre><code>dashboard.clerk.com -&gt; Webhooks -&gt; your endpoint<button data-copy>copy</button></code></pre>
+<p>You set a temporary URL in Step 3. After the first deploy, you have a real domain. Update Clerk:</p>
 <ol>
 <li>Open <a href="https://dashboard.clerk.com" target="_blank" rel="noopener">dashboard.clerk.com</a> &rarr; <b>Webhooks</b> &rarr; your endpoint.</li>
 <li>Paste your Vercel URL + <code>/api/webhooks/clerk</code> &rarr; <b>Save</b>.</li>
