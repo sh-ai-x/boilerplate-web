@@ -40,7 +40,52 @@ import re
 import sys
 from pathlib import Path
 
-VERDICT_RE = re.compile(r"Verdict:\s*(Approve|Blocked|Changes Requested)\b")
+# Issue #625 + #612 fix: support bold-wrapped forms too. Providers
+# (and the review agent's own prompt example block, which uses
+# `**Verdict:** Approve` to illustrate the line shape) sometimes wrap
+# the verdict label in Markdown bold. Three forms seen in the wild:
+#   - `Verdict: Approve`               (canonical)
+#   - `  Verdict: Approve  `           (with leading/trailing whitespace)
+#   - `**Verdict:** Approve`           (bold-wrapped label, common)
+# The 3rd form defeated the previous `Verdict:\s*(...)` regex; now
+# `(?:\*\*)?"?` consumes an optional `**` and an optional trailing `**`.
+# The "exact `Verdict:` line" contract documented in `bin/review-local.sh`
+# expects the bare form, but the parser is now tolerant of the bold
+# wrapper so a single provider-side summary envelope change doesn't
+# silently turn Approve into PARSE_FAILED.
+# Issue #625 + #612 fix: support bold-wrapped forms too. Providers
+# (and the review agent's own prompt example block, which uses
+# `**Verdict:** Approve` to illustrate the line shape) sometimes wrap
+# the verdict label and/or the value in Markdown bold. Five forms
+# seen in the wild:
+#   - `Verdict: Approve`                       (canonical)
+#   - `  Verdict: Approve  `                   (with leading/trailing whitespace)
+#   - `**Verdict:** Approve`                   (bold-wrapped label only)
+#   - `**Verdict: Approve**`                   (bold-wrapped whole line)
+#   - `**Verdict:** **Approve**`               (bold-wrapped both halves — common)
+# The 3rd / 5th forms defeated the previous `Verdict:\s*(...)` regex;
+# now `\*?\*?` consumes optional `**` around "Verdict" and ":\s*\**"
+# consumes optional `**` after the colon. A trailing `\**` strips the
+# closing bold on the value. The `Verdict approve (no colon)` form
+# still does NOT match — the colon is mandatory so prose like
+# "we approve this PR" can't satisfy the gate.
+# The "exact `Verdict:` line" contract documented in `bin/review-local.sh`
+# expects the bare form, but the parser is now tolerant of bold wrappers
+# so a single provider-side summary envelope change doesn't silently
+# turn Approve into PARSE_FAILED.
+VERDICT_RE = re.compile(
+    r"\*?\*?Verdict\*?\*?:\s*\**\s*(Approve|Blocked|Changes Requested)\b\**",
+    re.IGNORECASE,
+)
+# Secondary matcher for the `**Verdict:** **<value>**` double-bold form
+# where whitespace separates two `**` runs. The primary regex captures
+# the value as long as `**` doesn't break the value token; this
+# secondary runs against the same text and wins only if the primary
+# failed AND this one matches — a safety net for an envelope change.
+VERDICT_DOUBLE_BOLD_RE = re.compile(
+    r"\*\*Verdict:\*\*\s+\*\*(Approve|Blocked|Changes Requested)\b",
+    re.IGNORECASE,
+)
 
 # Issue #625: MINIMAX wrapper emits only `type=result` summary messages;
 # the verdict is in one of those. Other message types (user, tool_use,
@@ -144,6 +189,13 @@ def extract(path: Path) -> str:
             m = VERDICT_RE.search(t)
             if m:
                 last_verdict = m.group(1)
+                continue
+            # Fallback for double-bold `**Verdict:** **Approve**` form
+            # where the value is wrapped in its own `**` runs. Tested in
+            # tests/test_extract_verdict.py::test_double_bold_verdict.
+            m = VERDICT_DOUBLE_BOLD_RE.search(t)
+            if m:
+                last_verdict = m.group(1)
     # No candidate message contained a `Verdict:` line — emit the
     # sentinel so the gate hard-fails (issue #612 fix; the no-file /
     # HTML / unreadable cases above still return "" for the caller's
@@ -199,8 +251,13 @@ def extract_from_comments(path: Path) -> str:
         # summary comment body starts with a single-line "Verdict:"
         # preamble followed by the review content; the audit comment
         # has no verdict line at all. The regex is the same as the
-        # execution-file path so the verdict semantics match.
+        # execution-file path so the verdict semantics match. The
+        # secondary matcher handles `**Verdict:** **Approve**` form.
         m = VERDICT_RE.search(body)
+        if m:
+            last_verdict = m.group(1)
+            continue
+        m = VERDICT_DOUBLE_BOLD_RE.search(body)
         if m:
             last_verdict = m.group(1)
     return last_verdict
