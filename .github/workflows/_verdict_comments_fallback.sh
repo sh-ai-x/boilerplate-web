@@ -23,8 +23,13 @@ set -euo pipefail
 : "${PR_NUMBER:?_verdict_comments_fallback.sh requires PR_NUMBER env}"
 JOB_NAME="${JOB_NAME:-fallback}"
 WORKSPACE="${WORKSPACE:-$PWD}"
-MAX_TRIES="${MAX_TRIES:-6}"
-SLEEP_SECONDS="${SLEEP_SECONDS:-5}"
+# Issue #625 retry window: the agent-run step + claude[bot] PR comment
+# is asynchronous. Empirically the verdict comment lands 30-60s after the
+# agent exits. Default 12 tries × 8s = 96s covers the full race window
+# (was 6 × 5s = 30s, which closed only the early half of the race and
+# gave up before claude[bot]'s comment landed on slow provider runs).
+MAX_TRIES="${MAX_TRIES:-12}"
+SLEEP_SECONDS="${SLEEP_SECONDS:-8}"
 
 for attempt in $(seq 1 "$MAX_TRIES"); do
   # JSON output: [{author:{login},body,createdAt}, ...] for THIS run's PR.

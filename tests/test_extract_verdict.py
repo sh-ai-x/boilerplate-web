@@ -158,16 +158,11 @@ def test_jsonl_only_garbled_lines(tmp_path: Path) -> None:
 
 
 def test_jsonl_assistant_with_bold_wrapped_verdict(tmp_path: Path) -> None:
-    """Bold-wrapped `**Verdict:**` (PR-comment format) is NOT recognized.
-
-    extract-verdict.py only matches the non-bold `Verdict:` form (the
-    contract the agent's prompt requires). Bold-wrapped is what the
-    PR-comment renderer emits, which the gate's separate comment-body
-    parser (`maintenance_gate.py:extract_verdict`) handles. Keeping
-    the two parsers distinct avoids the silent-Approve bug from
-    issue #612 — if we silently accepted bold-wrapped here, a
-    wrapper change that flips one form to the other would still
-    silently pass.
+    """Bold-wrapped `**Verdict:** Approve` IS recognized (Issue #625 envelope
+    tolerance: agent prompts frequently render the example line in bold,
+    and the MINIMAX provider's summary envelope also uses the bold form.
+    The previous "only the bare form matches" contract silently turned
+    these into PARSE_FAILED).
     """
     target = tmp_path / "agent.json"
     _write_jsonl(
@@ -178,7 +173,7 @@ def test_jsonl_assistant_with_bold_wrapped_verdict(tmp_path: Path) -> None:
     )
     result = _run([str(target)])
     assert result.returncode == 0
-    assert result.stdout.strip() == PARSE_FAILED
+    assert result.stdout.strip() == "Approve"
 
 
 def test_jsonl_single_approve(tmp_path: Path) -> None:
@@ -665,3 +660,54 @@ def test_clean_result_message_still_extracted(tmp_path: Path) -> None:
     result = _run([str(target)])
     assert result.returncode == 0
     assert result.stdout.strip() == "Approve"
+
+
+# --- Bold-wrapped verdict forms (Issue #625 envelope-change tolerance) ---
+
+
+def test_bold_wrapped_label_only(tmp_path: Path) -> None:
+    """`**Verdict:** Approve` form (label bold-wrapped, value plain)."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [{"type": "assistant", "message": {"content": [{"type": "text", "text": "**Verdict:** Approve"}]}}],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Approve"
+
+
+def test_bold_wrapped_whole_line(tmp_path: Path) -> None:
+    """`**Verdict: Approve**` form (whole line wrapped)."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [{"type": "assistant", "message": {"content": [{"type": "text", "text": "**Verdict: Approve**"}]}}],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Approve"
+
+
+def test_double_bold_form(tmp_path: Path) -> None:
+    """`**Verdict:** **Approve**` form (both halves bold-wrapped)."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [{"type": "assistant", "message": {"content": [{"type": "text", "text": "**Verdict:** **Approve**"}]}}],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Approve"
+
+
+def test_bold_verdict_in_result_envelope(tmp_path: Path) -> None:
+    """The bold-wrapped form should also work in the MINIMAX `type=result` envelope."""
+    target = tmp_path / "agent.json"
+    _write_jsonl(
+        target,
+        [{"type": "result", "subtype": "success", "result": "**Verdict:** Blocked"}],
+    )
+    result = _run([str(target)])
+    assert result.returncode == 0
+    assert result.stdout.strip() == "Blocked"
