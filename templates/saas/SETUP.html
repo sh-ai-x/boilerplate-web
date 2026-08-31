@@ -19,6 +19,11 @@
     --danger: #f85149;
     --code-fg: #c9d1d9;
     --clerk: #6c47ff;
+    --supabase: #3ecf8e;
+    --neon: #00e1ff;
+    --vercel: #ffffff;
+    --deploy: #ffa500;
+    --info: #58a6ff;
   }
   body { margin: 0; background: var(--bg); color: var(--fg); color-scheme: dark; font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   header { position: sticky; top: 0; background: var(--bg-elev); border-bottom: 1px solid var(--border); padding: 14px 28px; z-index: 10; display: flex; align-items: center; gap: 20px; }
@@ -38,6 +43,10 @@
   section.step h2 .sub { color: var(--fg-muted); font-weight: 400; font-size: 0.83em; margin-left: 4px; }
   section.step h2 .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--bg-code); border: 1px solid var(--border); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
   section.step h2 .pill.clerk { color: var(--clerk); border-color: var(--clerk); }
+  section.step h2 .pill.none { color: var(--fg-muted); border-color: var(--fg-muted); font-style: italic; }
+  section.step h2 .pill.supabase { color: var(--supabase); border-color: var(--supabase); }
+  section.step h2 .pill.neon { color: var(--neon); border-color: var(--neon); }
+  section.step h2 .pill.vercel { color: var(--deploy); border-color: var(--deploy); }
   section.step p, section.step li { color: var(--fg); }
   pre { background: var(--bg-code); border: 1px solid var(--border); color: var(--code-fg); padding: 14px 18px 14px 16px; border-radius: 8px; overflow-x: auto; font: 13px/1.55 ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin: 10px 0; position: relative; white-space: pre; }
   pre button { position: absolute; top: 8px; right: 8px; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border); border-radius: 5px; padding: 3px 10px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
@@ -69,22 +78,58 @@
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
   .grid > div { padding: 10px 12px; background: var(--bg-code); border: 1px solid var(--border); border-radius: 6px; }
   .grid b { color: var(--accent); display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+  .matrix-wrap { background: var(--bg-code); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin: 18px 0; overflow-x: auto; }
+  .matrix-wrap table { margin: 0; font-size: 12.5px; }
+  .matrix-wrap th, .matrix-wrap td { padding: 6px 10px; }
+  .matrix-wrap td code { font-size: 11.5px; }
+  .pill-mini { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; font-family: ui-monospace, monospace; }
+  .pill-mini.clerk { color: var(--clerk); border-color: var(--clerk); }
+  .pill-mini.supabase { color: var(--supabase); border-color: var(--supabase); }
+  .pill-mini.neon { color: var(--neon); border-color: var(--neon); }
+  .pill-mini.vercel { color: var(--deploy); border-color: var(--deploy); }
+  .pill-mini.none { color: var(--fg-muted); border-color: var(--fg-muted); font-style: italic; }
+  .info { background: var(--bg-code); border-left: 4px solid var(--info); padding: 12px 16px; border-radius: 6px; margin: 14px 0; color: var(--fg); }
+  .info b, .info strong { color: var(--info); }
+  .skip-note { color: var(--fg-muted); font-size: 13px; font-style: italic; margin-top: 8px; }
 </style>
 </head>
 <body>
 <header>
   <h1><span class="brand">$</span>saas - Setup &amp; Deploy Guide</h1>
-  <div class="progress"><div class="progress-bar"><div id="pf"></div></div><div class="progress-text" id="pft">0 / 9 steps</div></div>
+  <div class="progress"><div class="progress-bar"><div id="pf"></div></div><div class="progress-text" id="pft">0 / 10 steps</div></div>
   <button class="reset-btn" id="reset">reset progress</button>
 </header>
 
 <main>
 <p style="color:var(--fg-muted); margin-top:0;">Stay open in your browser while running these commands in another terminal.</p>
 
+<section class="adapters" id="adapters" style="background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:22px 26px; margin-bottom:22px;">
+<h2 style="margin-top:0; font-size:17px;">Adapter matrix - pick your combination</h2>
+<p style="color:var(--fg-muted); margin-top:0; font-size:13.5px;">Three independent choices. Each step below tags which combinations it applies to. Skip steps that don't match yours.</p>
+<div class="matrix-wrap">
+<table><thead><tr><th><span class="pill-mini clerk">--auth</span></th><th><span class="pill-mini supabase">--db</span></th><th><span class="pill-mini vercel">--deploy-target</span></th><th>What you configure</th><th>Steps to follow</th></tr></thead><tbody>
+<tr><td><span class="pill-mini clerk">clerk</span></td><td><span class="pill-mini supabase">supabase</span></td><td><span class="pill-mini vercel">vercel</span></td><td>Clerk + Supabase + Vercel + CF WAF + Toss (full stack)</td><td>1, 2, 3, 4, 5, 6, 7, 8</td></tr>
+<tr><td><span class="pill-mini clerk">clerk</span></td><td><span class="pill-mini supabase">supabase</span></td><td><span class="pill-mini none">none</span></td><td>Clerk + Supabase, deploy yourself</td><td>1, 2, 3, 4, 8 (no GitHub Actions)</td></tr>
+<tr><td><span class="pill-mini clerk">clerk</span></td><td><span class="pill-mini neon">neon</span></td><td><span class="pill-mini vercel">vercel</span></td><td>Clerk + Neon (Drizzle) + Vercel + Toss</td><td>1, 2, 3, 4 (Drizzle), 5, 6, 7, 8</td></tr>
+<tr><td><span class="pill-mini clerk">clerk</span></td><td><span class="pill-mini neon">neon</span></td><td><span class="pill-mini none">none</span></td><td>Clerk + Neon, deploy yourself</td><td>1, 2, 3, 4 (Drizzle), 8</td></tr>
+<tr><td><span class="pill-mini none">none</span></td><td><span class="pill-mini supabase">supabase</span></td><td><span class="pill-mini vercel">vercel</span></td><td>no auth, Supabase, Vercel + Toss</td><td>1, 2, 4, 5, 6, 7, 8 (no Clerk)</td></tr>
+<tr><td><span class="pill-mini none">none</span></td><td><span class="pill-mini supabase">supabase</span></td><td><span class="pill-mini none">none</span></td><td>no auth, Supabase, deploy yourself</td><td>1, 2, 4, 8</td></tr>
+<tr><td><span class="pill-mini none">none</span></td><td><span class="pill-mini neon">neon</span></td><td><span class="pill-mini vercel">vercel</span></td><td>no auth, Neon, Vercel + Toss</td><td>1, 2, 4 (Drizzle), 5, 6, 7, 8</td></tr>
+<tr><td><span class="pill-mini none">none</span></td><td><span class="pill-mini neon">neon</span></td><td><span class="pill-mini none">none</span></td><td>bare Next.js + Neon, deploy anywhere</td><td>1, 2, 4 (Drizzle), 8</td></tr>
+</tbody></table>
+</div>
+<div class="info"><b>Runtime override.</b> Adapter selection happens at request time via <code>getAuthAdapter()</code> / <code>getDbAdapter()</code>. The highest-priority env var is <code>AUTH_PROVIDER</code> (values: <code>clerk</code> | <code>none</code>) and <code>DB_PROVIDER</code> (values: <code>supabase</code> | <code>neon</code>). If unset, detection falls back to env-key presence, then defaults. <b>This means you can switch adapters after scaffold without re-running the CLI</b> — just set the env var, redeploy, and the new adapter takes over. See Step 9 below.</div>
+</section>
+
 <section class="step" id="step-0" data-step="0">
 <h2>Step 0 - Scaffold <span class="sub">(one line)</span></h2>
-<pre><code>npx create-boilerplate-web ./my-saas --type=saas --yes --allow-unsafe-path --skip-install --deploy</code><button data-copy>copy</button></pre>
-<p>What this does: clones <code>templates/saas/</code> + <code>templates/_shared/</code>, writes <code>pnpm-workspace.yaml</code>, rewrites the project's <code>package.json</code> <code>"name"</code>.</p>
+<p>Replace <code>--auth</code>, <code>--db</code>, and <code>--deploy-target</code> based on your matrix row above. Drop any flag you don't care about &mdash; it defaults to <code>clerk</code> / <code>supabase</code> / <code>vercel</code>.</p>
+<pre><code># default (clerk + supabase + vercel)
+npx create-boilerplate-web ./my-saas --type=saas --yes --allow-unsafe-path --skip-install --deploy
+
+# minimal (no auth + neon + no deploy workflow)
+npx create-boilerplate-web ./my-saas --type=saas --auth=none --db=neon --deploy-target=none --yes --allow-unsafe-path --skip-install</code><button data-copy>copy</button></pre>
+<p>What this does: clones <code>templates/saas/</code> + <code>templates/_shared/</code>, writes <code>pnpm-workspace.yaml</code>, rewrites the project's <code>package.json</code> <code>"name"</code>. The <code>--auth=none</code> / <code>--db=neon</code> / <code>--deploy-target=none</code> flags cause the CLI to <b>delete</b> files that don't apply (Clerk pages, Supabase migrations, GitHub Actions workflow) and write <code>.boilerplate.json</code> recording your choice.</p>
 <label class="check"><input type="checkbox" data-step-check="0">Done - scaffolded target exists</label>
 </section>
 
@@ -98,33 +143,48 @@ pnpm install</code><button data-copy>copy</button></pre>
 </section>
 
 <section class="step" id="step-2" data-step="2">
-<h2>Step 2 - Fill in .env.local <span class="sub">(3 services, 9 keys)</span></h2>
+<h2>Step 2 - Fill in .env.local <span class="pill clerk">clerk</span> <span class="pill supabase">supabase</span></h2>
+<p>The keys below are scoped by adapter. Pick the rows that match <b>your</b> matrix row.</p>
 <pre><code>cp .env.example .env.local
 $EDITOR .env.local</code><button data-copy>copy</button></pre>
-<details><summary>Where to get each key (3 dashboards)</summary>
-<div class="grid">
-  <div><b>Clerk</b>dashboard.clerk.com -&gt; API Keys (3 keys) + Webhooks (1 secret)</div>
-  <div><b>Supabase</b>supabase.com/dashboard -&gt; Settings API + General + Account Tokens</div>
-  <div><b>Toss</b>tosspayments.com -&gt; developer dashboard -&gt; API keys</div>
-</div></details>
+<details open><summary>--auth=clerk (skip if --auth=none)</summary>
+<table><thead><tr><th>Key</th><th>Source</th></tr></thead><tbody>
+<tr><td><code>NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY</code></td><td>Clerk &rarr; API Keys &rarr; Publishable (<code>pk_test_...</code>)</td></tr>
+<tr><td><code>CLERK_SECRET_KEY</code></td><td>Clerk &rarr; API Keys &rarr; Secret (<code>sk_test_...</code>)</td></tr>
+<tr><td><code>CLERK_WEBHOOK_SECRET</code></td><td>Clerk &rarr; Webhooks &rarr; endpoint signing secret (<code>whsec_...</code>)</td></tr>
+</tbody></table>
+</details>
+<details open><summary>--db=supabase (skip if --db=neon)</summary>
 <table><thead><tr><th>Key</th><th>Source</th></tr></thead><tbody>
 <tr><td><code>NEXT_PUBLIC_SUPABASE_URL</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; Project URL</td></tr>
-<tr><td><code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; Publishable key (starts <code>sb_publishable_</code>)</td></tr>
-<tr><td><code>SUPABASE_SECRET_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; Secret key, server-only (starts <code>sb_secret_</code>)</td></tr>
+<tr><td><code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; Publishable (<code>sb_publishable_...</code>)</td></tr>
+<tr><td><code>SUPABASE_SECRET_KEY</code></td><td>Supabase &rarr; Settings &rarr; API &rarr; Secret (<code>sb_secret_...</code>)</td></tr>
 <tr><td><code>SUPABASE_JWKS_URL</code></td><td>Supabase &rarr; Auth &rarr; Sign In/Up &rarr; Third Party Auth &rarr; Add provider (Clerk) &rarr; JWKS URL</td></tr>
-<tr><td><code>NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY</code></td><td>Clerk &rarr; API Keys &rarr; Publishable key (starts <code>pk_test_</code>)</td></tr>
-<tr><td><code>CLERK_SECRET_KEY</code></td><td>Clerk &rarr; API Keys &rarr; Secret key (starts <code>sk_test_</code>)</td></tr>
-<tr><td><code>CLERK_WEBHOOK_SECRET</code></td><td>Clerk &rarr; Webhooks &rarr; endpoint signing secret (starts <code>whsec_</code>)</td></tr>
-<tr><td><code>TOSS_SECRET_KEY</code></td><td>Toss &rarr; developer &rarr; API keys &rarr; Live Secret</td></tr>
-<tr><td><code>TOSS_AUTH_KEY</code></td><td>Toss &rarr; developer &rarr; API keys &rarr; Live Auth</td></tr>
-<tr><td><code>VERCEL_TOKEN</code></td><td>Vercel &rarr; Account Settings &rarr; Tokens &rarr; Create Token (GitHub deploy scope)</td></tr>
+</tbody></table>
+</details>
+<details><summary>--db=neon (only if --db=neon)</summary>
+<table><thead><tr><th>Key</th><th>Source</th></tr></thead><tbody>
+<tr><td><code>DATABASE_URL</code></td><td>Neon &rarr; Connection Details &rarr; pooled connection string (<code>postgres://...?sslmode=require</code>)</td></tr>
+</tbody></table>
+<p class="skip-note">Aliases also accepted: <code>NEON_DATABASE_URL</code>, <code>POSTGRES_URL</code>.</p>
+</details>
+<details><summary>--deploy-target=vercel (these go to GitHub Secrets, not .env.local)</summary>
+<table><thead><tr><th>Key</th><th>Source</th></tr></thead><tbody>
+<tr><td><code>VERCEL_TOKEN</code></td><td>Vercel &rarr; Account Settings &rarr; Tokens</td></tr>
 <tr><td><code>VERCEL_ORG_ID</code></td><td>Vercel &rarr; Account Settings &rarr; General &rarr; Your ID</td></tr>
-<tr><td><code>CF_API_TOKEN</code></td><td>Cloudflare &rarr; My Profile &rarr; API Tokens &rarr; Create Token (Edit zone WAF template)</td></tr>
+<tr><td><code>CF_API_TOKEN</code></td><td>Cloudflare &rarr; My Profile &rarr; API Tokens &rarr; Edit zone WAF template</td></tr>
 <tr><td><code>CF_ZONE_ID</code></td><td>Cloudflare &rarr; domain overview &rarr; right column &rarr; Zone ID</td></tr>
 <tr><td><code>SUPABASE_ACCESS_TOKEN</code></td><td>Supabase &rarr; account/tokens &rarr; Generate new token</td></tr>
-<tr><td><code>SUPABASE_PROJECT_REF</code></td><td>Supabase &rarr; project &rarr; Settings &rarr; General &rarr; Reference ID (20-char slug in URL)</td></tr>
+<tr><td><code>SUPABASE_PROJECT_REF</code></td><td>Supabase &rarr; project &rarr; Settings &rarr; General &rarr; Reference ID</td></tr>
 </tbody></table>
-<div class="tip"><b>Auto-fill:</b> if these env vars are in your shell, <code>./scripts/auto-fill-env.sh</code> writes them to <code>.env.local</code> for you:
+</details>
+<details><summary>Always needed (any combo, only if you use /pricing)</summary>
+<table><thead><tr><th>Key</th><th>Source</th></tr></thead><tbody>
+<tr><td><code>TOSS_SECRET_KEY</code></td><td>Toss &rarr; developer &rarr; API keys &rarr; Live Secret</td></tr>
+<tr><td><code>TOSS_AUTH_KEY</code></td><td>Toss &rarr; developer &rarr; API keys &rarr; Live Auth</td></tr>
+</tbody></table>
+</details>
+<div class="tip"><b>Auto-fill (--auth=clerk --db=supabase only):</b> if these are in your shell, <code>./scripts/auto-fill-env.sh</code> writes them to <code>.env.local</code> for you:
 <pre><code>export NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_xxx"
 export CLERK_SECRET_KEY="sk_test_xxx"
 export NEXT_PUBLIC_SUPABASE_URL="https://xxx.supabase.co"
@@ -132,11 +192,11 @@ export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="sb_publishable_xxx"
 export SUPABASE_SECRET_KEY="sb_secret_xxx"
 export SUPABASE_ACCESS_TOKEN="sbp_xxx"
 export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
-<label class="check"><input type="checkbox" data-step-check="2">Done - 9 values pasted</label>
+<label class="check"><input type="checkbox" data-step-check="2">Done - env.local filled for my adapter combo</label>
 </section>
 
 <section class="step" id="step-3" data-step="3">
-<h2>Step 3 - Configure Clerk <span class="pill clerk">clerk</span></h2>
+<h2>Step 3 - Configure Clerk <span class="pill clerk">clerk</span> <span class="pill none">skip if --auth=none</span></h2>
 <pre><code>dashboard.clerk.com -&gt; API Keys (left nav)<button data-copy>copy</button></code></pre>
 <ol>
 <li><a href="https://dashboard.clerk.com" target="_blank" rel="noopener">dashboard.clerk.com</a> &rarr; <b>Create Application</b> (name: anything, enable Email + Google + GitHub).</li>
@@ -162,7 +222,9 @@ export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
 </section>
 
 <section class="step" id="step-4" data-step="4">
-<h2>Step 4 - Create Supabase project</h2>
+<h2>Step 4 - Create DB project <span class="pill supabase">supabase</span> <span class="pill neon">neon</span></h2>
+<p>Follow only the <b>one</b> panel that matches <code>--db</code>.</p>
+<details open><summary>--db=supabase</summary>
 <pre><code>supabase.com/dashboard -&gt; New Project<button data-copy>copy</button></code></pre>
 <ol>
 <li><a href="https://supabase.com/dashboard" target="_blank" rel="noopener">supabase.com/dashboard</a> &rarr; <b>New Project</b>. Pick name + region. Save the DB password somewhere.</li>
@@ -175,12 +237,39 @@ export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
 </li>
 <li>From <b>Settings &rarr; General</b>, copy the <b>Reference ID</b> (20-char slug in the URL) &rarr; this is your <code>SUPABASE_PROJECT_REF</code>.</li>
 <li>From <a href="https://supabase.com/dashboard/account/tokens" target="_blank" rel="noopener">account/tokens</a>, <b>Generate new token</b> (one per Supabase account, reusable across projects) &rarr; <code>SUPABASE_ACCESS_TOKEN</code>.</li>
+<li><b>Wire Clerk as Supabase third-party auth</b> (only if <code>--auth=clerk</code>):
+  <ol>
+    <li>Supabase dashboard &rarr; <b>Authentication &rarr; Sign In/Up &rarr; Third Party Auth &rarr; Add provider &rarr; Clerk</b>.</li>
+    <li>Paste your Clerk <b>JWKS URL</b>:
+      <ul>
+        <li>Dev: <code>https://&lt;your-frontend-api&gt;.clerk.accounts.dev/.well-known/jwks.json</code></li>
+        <li>Prod: <code>https://clerk.&lt;your-domain&gt;/.well-known/jwks.json</code></li>
+      </ul>
+    </li>
+    <li>Find your frontend API at <a href="https://dashboard.clerk.com" target="_blank" rel="noopener">dashboard.clerk.com</a> &rarr; <b>API Keys</b> &rarr; "Show frontend API" (or derive from <code>pk_test_xxx</code> &rarr; <code>xxx.clerk.accounts.dev</code>).</li>
+    <li>Save the same URL into <code>SUPABASE_JWKS_URL</code> in <code>.env.local</code> (used by self-hosted Supabase deployments).</li>
+  </ol>
+  <p>After this, RLS policies can read the Clerk user id via <code>auth.jwt() -&gt;&gt; 'sub'</code>.</p>
+</li>
 </ol>
-<label class="check"><input type="checkbox" data-step-check="4">Done - 5 Supabase values ready (3 URLs + ref + access token)</label>
+</details>
+<details><summary>--db=neon</summary>
+<pre><code>console.neon.tech -&gt; New Project<button data-copy>copy</button></code></pre>
+<ol>
+<li><a href="https://console.neon.tech" target="_blank" rel="noopener">console.neon.tech</a> &rarr; <b>New Project</b>. Pick region. Default Postgres 16 is fine.</li>
+<li>From the project dashboard, click <b>Connection Details</b> &rarr; toggle to <b>Pooled connection</b> &rarr; copy the connection string into <code>DATABASE_URL</code>.</li>
+<li>Run schema migration after Step 6:
+  <pre><code>pnpm drizzle-kit push</code><button data-copy>copy</button></pre>
+  <p>Replaces <code>supabase db push</code>. The Drizzle schema lives at <code>templates/_shared/adapters/db/schema.ts</code> in the repo; the scaffold copy is in your project root.</p>
+</li>
+<li><b>No Edge Functions</b>. If a feature previously called a Supabase Edge Function (e.g. <code>billing</code>), you must port it to a Next.js Route Handler at <code>app/api/billing/route.ts</code>. The Neon adapter doesn't proxy <code>.rpc()</code> to Edge Functions.</li>
+</ol>
+</details>
+<label class="check"><input type="checkbox" data-step-check="4">Done - DB project ready + keys pasted (Supabase) OR Neon connection string pasted (Neon)</label>
 </section>
 
 <section class="step" id="step-5" data-step="5">
-<h2>Step 5 - Cloudflare + Toss accounts</h2>
+<h2>Step 5 - Cloudflare + Toss accounts <span class="pill vercel">vercel</span> <span class="pill none">skip if --deploy-target=none</span></h2>
 <pre><code>dash.cloudflare.com/sign-up AND tosspayments.com<button data-copy>copy</button></code></pre>
 <p>Two short sign-ups. Do them in parallel - both take &lt;2 min.</p>
 <div class="grid">
@@ -192,8 +281,8 @@ export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
 </section>
 
 <section class="step" id="step-6" data-step="6">
-<h2>Step 6 - Run setup <span class="sub">(one command)</span></h2>
-<div class="note">Will run <code>supabase link</code>, <code>supabase db push</code>, deploy the <code>billing</code> Edge Function, init git, push to GitHub, set 7 repo secrets.</div>
+<h2>Step 6 - Run setup <span class="sub">(one command)</span> <span class="pill vercel">vercel</span> <span class="pill none">skip if --deploy-target=none</span></h2>
+<div class="note">Will run <code>supabase link</code> (or <code>drizzle-kit push</code> if --db=neon), <code>supabase db push</code>, deploy the <code>billing</code> Edge Function, init git, push to GitHub, set 7 repo secrets.</div>
 <pre><code>export GH_REPO_NAME=my-saas
 ./scripts/setup.sh --check    # verifies prereqs first (dry-run)
 ./scripts/setup.sh            # actually does it</code><button data-copy>copy</button></pre>
@@ -202,7 +291,7 @@ export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
 </section>
 
 <section class="step" id="step-7" data-step="7">
-<h2>Step 7 - Update Clerk webhook URL</h2>
+<h2>Step 7 - Update Clerk webhook URL <span class="pill clerk">clerk</span> <span class="pill vercel">vercel</span> <span class="pill none">skip if --auth=none or --deploy-target=none</span></h2>
 <pre><code>dashboard.clerk.com -&gt; Webhooks -&gt; your endpoint<button data-copy>copy</button></code></pre>
 <p>You set a temporary URL in Step 3. After the first deploy, you have a real domain. Update Clerk:</p>
 <ol>
@@ -215,16 +304,36 @@ export SUPABASE_PROJECT_REF="abcdefghij"</code></div>
 </section>
 
 <section class="step" id="step-8" data-step="8">
-<h2>Step 8 - Watch first deploy</h2>
+<h2>Step 8 - Watch first deploy <span class="pill vercel">vercel</span> <span class="pill none">skip if --deploy-target=none</span></h2>
 <pre><code>gh run watch --repo "&lt;OWNER&gt;/&lt;REPO&gt;"</code><button data-copy>copy</button></pre>
-<p>4 jobs run in parallel:</p>
+<p>Jobs that run in parallel (some skip based on --db / --deploy-target):</p>
 <ul>
-<li><code>vercel-deploy</code> - Next.js build + push to Vercel</li>
-<li><code>cloudflare-pages-deploy</code> - alternate deploy target (skipped if <code>CF_API_TOKEN</code> is missing)</li>
-<li><code>supabase-functions</code> - deploys the <code>billing</code> Edge Function</li>
-<li><code>cloudflare-waf</code> - applies 6 WAF rules from <code>cloudflare-rules.json</code></li>
+<li><code>vercel-deploy</code> - Next.js build + push to Vercel <span class="pill-mini vercel">vercel</span></li>
+<li><code>cloudflare-pages-deploy</code> - alternate deploy target (skipped if <code>CF_API_TOKEN</code> is missing) <span class="pill-mini vercel">vercel</span></li>
+<li><code>supabase-functions</code> - deploys the <code>billing</code> Edge Function <span class="pill-mini supabase">supabase</span> (skipped if <code>--db=neon</code>)</li>
+<li><code>cloudflare-waf</code> - applies 6 WAF rules from <code>cloudflare-rules.json</code> <span class="pill-mini vercel">vercel</span></li>
 </ul>
-<label class="check"><input type="checkbox" data-step-check="8">Done - all 4 jobs green + https://&lt;domain&gt;.vercel.app returns 200</label>
+<p>If <code>--deploy-target=none</code>: skip this step entirely. Run locally with <code>pnpm build &amp;&amp; pnpm start</code> or push the <code>.next/</code> output to your platform of choice (Docker / Fly / Railway / etc.).</p>
+<label class="check"><input type="checkbox" data-step-check="8">Done - all applicable jobs green + https://&lt;domain&gt;.vercel.app returns 200</label>
+</section>
+
+<section class="step" id="step-9" data-step="9">
+<h2>Step 9 - Override adapters at runtime <span class="pill none">optional</span></h2>
+<p>You can switch adapters <b>after</b> scaffold without re-running the CLI. The highest-priority signal is the env var; the runtime re-detects on next request.</p>
+<pre><code># In .env.local (or Vercel project settings):
+
+# Switch off Clerk without re-scaffolding
+AUTH_PROVIDER=none
+
+# Switch from Supabase to Neon
+DB_PROVIDER=neon
+DATABASE_URL=postgres://user:pass@ep-xxx.neon.tech/mydb
+
+# Remove deploy workflow without re-scaffolding
+# (not reversible at runtime -- you need to re-add the workflow file from the repo root)</code><button data-copy>copy</button></pre>
+<div class="info"><b>How detection resolves.</b> <code>getAuthAdapter()</code> reads in order: (1) <code>AUTH_PROVIDER</code> env, (2) <code>NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY</code> present, (3) default to <code>clerk</code>. <code>getDbAdapter()</code> reads in order: (1) <code>DB_PROVIDER</code> env, (2) <code>NEXT_PUBLIC_SUPABASE_URL</code> present, (3) <code>DATABASE_URL</code> starts with <code>postgres://</code>, (4) default to <code>supabase</code>. Source: <code>templates/_shared/adapters/&lt;auth|db&gt;/index.ts#detectKind()</code>.</div>
+<div class="tip"><b>Adding a new adapter (advanced).</b> Create <code>templates/_shared/adapters/&lt;auth|db&gt;/&lt;provider&gt;.ts</code> implementing the interface (see <code>types.ts</code>), then add one line to the factory's <code>detectKind()</code>. Consumer code is unchanged.</div>
+<label class="check"><input type="checkbox" data-step-check="9">Done - understand override path (or skipped - not switching adapters)</label>
 </section>
 
 <footer>
@@ -234,7 +343,7 @@ Troubleshoot in <code>SETUP.md</code> &middot; CLAUDE.md is the project's source
 
 <script>
 const STORAGE_KEY = 'saas-setup-progress';
-const STEPS = ['0','1','2','3','4','5','6','7','8'];
+const STEPS = ['0','1','2','3','4','5','6','7','8','9'];
 function loadProgress() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { return {}; } }
 function saveProgress(p) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch (e) {} }
 function updateUI() {

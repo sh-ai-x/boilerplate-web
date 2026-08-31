@@ -1,210 +1,358 @@
 # saas — Post-scaffold Setup Guide
 
-> **You just ran** `npx create-boilerplate-web <dir> --type=saas --yes --allow-unsafe-path` and now have a fresh Next.js + Supabase + Cloudflare + Toss app in `<dir>`.
+> **You just ran** `npx create-boilerplate-web <dir> --type=saas [...]` and now have a fresh Next.js app in `<dir>`.
 >
-> This guide walks you from "scaffolded" → "first deploy live on Vercel" in **~15 minutes** with mostly copy-paste commands.
+> This guide walks you from "scaffolded" → "first deploy live" in **~10–20 minutes** depending on which adapters you picked.
 >
-> Read the whole guide once before starting — there are 6 one-time external setups that must be done in the listed order.
+> **Pick your adapter combination first** — it determines which sections of this guide you follow.
 
-## TL;DR — what you'll do
+---
 
-| # | Step | Where | Time |
-|---|------|-------|------|
-| 1 | Sign up for Supabase + create project | supabase.com dashboard | 2 min |
-| 2 | Sign up for Vercel | vercel.com dashboard | 1 min |
-| 3 | Sign up for Cloudflare + add domain | cloudflare.com dashboard | 2 min |
-| 4 | Sign up for Toss Payments | tosspayments.com dashboard | 5 min |
-| 5 | Set env vars in `.env.local` | local edit | 30 sec |
-| 6 | Link Supabase + push migrations + deploy Edge Function | `supabase` CLI | 30 sec |
-| 7 | Push to GitHub + set 7 secrets | `gh` CLI | 1 min |
-| 8 | First deploy | Vercel auto + GitHub Actions | 30 sec + 2 min build |
+## 0 · Pick your adapters (read this first)
 
-**Single local command required after env vars are set:**
+The CLI scaffolds three independent choices. **You can change your mind later** — the runtime detects via env vars (`AUTH_PROVIDER`, `DB_PROVIDER`) and falls back to whichever keys are present in your shell.
 
-```bash
-./scripts/setup.sh          # does steps 5-7 (auto-fills .env.local from MCP/API tokens if present, links Supabase, deploys Edge Function, sets GitHub secrets)
+### 0.1 · CLI flags you passed (or defaults)
+
+| Flag | Values | Default | What it controls |
+|---|---|---|---|
+| `--auth` | `clerk` \| `none` | `clerk` | Auth provider + Clerk UI / pages |
+| `--db` | `supabase` \| `neon` | `supabase` | Database backend + migrations / Edge Functions |
+| `--deploy-target` | `vercel` \| `none` | `vercel` | GitHub Actions deploy workflow |
+
+### 0.2 · All 8 valid combinations
+
+| `--auth` | `--db` | `--deploy-target` | What you'll configure | Time |
+|---|---|---|---|---|
+| `clerk` | `supabase` | `vercel` | full stack — Clerk + Supabase + Vercel + CF WAF + Toss | ~15 min |
+| `clerk` | `supabase` | `none` | Clerk + Supabase, deploy via CLI/Fly/Railway | ~10 min |
+| `clerk` | `neon` | `vercel` | Clerk + Neon (Drizzle) + Vercel + Toss | ~12 min |
+| `clerk` | `neon` | `none` | Clerk + Neon, deploy elsewhere | ~8 min |
+| `none` | `supabase` | `vercel` | no auth, Supabase, Vercel + CF WAF + Toss | ~12 min |
+| `none` | `supabase` | `none` | no auth, Supabase, deploy elsewhere | ~7 min |
+| `none` | `neon` | `vercel` | no auth, Neon (Drizzle), Vercel + Toss | ~10 min |
+| `none` | `neon` | `none` | bare Next.js + Neon, deploy anywhere | ~5 min |
+
+### 0.3 · How runtime detection actually works
+
+`_shared/adapters/<auth|db>/index.ts#detectKind()` runs on first import:
+
+```
+AUTH_PROVIDER:
+  1. env AUTH_PROVIDER=clerk|none  → explicit override (highest priority)
+  2. NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY present in env  → 'clerk'
+  3. default → 'clerk'
+
+DB_PROVIDER:
+  1. env DB_PROVIDER=supabase|neon  → explicit override
+  2. NEXT_PUBLIC_SUPABASE_URL present  → 'supabase'
+  3. DATABASE_URL starts with postgres://  → 'neon'
+  4. default → 'supabase'
 ```
 
-## Pre-flight: external accounts (one-time)
+**Implication**: the SETUP.html/SETUP.md you see in the scaffold was generated based on **your `--auth × --db × --deploy-target` choice**. If you set `AUTH_PROVIDER=none` at runtime, the in-app UI will show the `NoAuthAdapter` (no sign-in buttons, `auth.getUserId()` returns `null`) — even if the scaffolded files include Clerk code. The setup guide is documentation; runtime wins.
 
-### Step 1 — Supabase project
+### 0.4 · How to switch adapters after scaffold
 
-1. Go to <https://supabase.com/dashboard> → **New project**.
-2. Pick a name, generate a strong DB password (save it!), pick a region.
-3. Wait for the project to provision (~90 seconds).
-4. From the project dashboard, copy:
-   - **Settings → API**:
-     - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-     - `anon public` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-     - `service_role` → `SUPABASE_SERVICE_ROLE_KEY`
-   - **Settings → General → Reference ID** (20-char alphanumeric in the URL path) → `SUPABASE_PROJECT_REF`
-5. Also generate an access token at <https://supabase.com/dashboard/account/tokens> → click **Generate new token**, save it as `SUPABASE_ACCESS_TOKEN`. (You only need to do this **once per Supabase account** — same token works for all your projects.)
+You don't need to re-scaffold. Just edit `.env.local`:
 
-### Step 2 — Vercel account
+```bash
+# Switch from Clerk to no auth without re-scaffolding
+AUTH_PROVIDER=none
+```
 
-1. Go to <https://vercel.com/signup> → sign up with GitHub.
-2. From your avatar → **Account Settings → General**, copy:
-   - **Your ID** → `VERCEL_ORG_ID` (use your personal-account ID if on the Hobby tier).
-3. Create a token: <https://vercel.com/account/tokens> → **Create Token** → full account scope → save the token as `VERCEL_TOKEN`.
-4. **Don't create the Vercel project yet** — step 8 creates it automatically when you push to GitHub. `VERCEL_PROJECT_ID` is auto-generated on first import and won't be needed until that step.
+```bash
+# Switch from Supabase to Neon
+DB_PROVIDER=neon
+DATABASE_URL=postgres://user:pass@ep-xxx.neon.tech/mydb
+```
 
-**Summary — Vercel provides 3 secrets: `VERCEL_TOKEN` + `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID` (last one auto-set after first import).**
+Then re-run `pnpm install` (only required if `--auth`/`--db` changed which packages are present), set the new env vars, and `pnpm dev` will pick the new adapter on next request.
 
-### Step 3 — Cloudflare account (only needed if you want bot protection + WAF)
+---
 
-1. Go to <https://dash.cloudflare.com/sign-up> → create account, add your domain.
-2. From **Workers & Pages → Overview**, find your **Account ID** on the right side → save as `CF_ZONE_ID` (no — use the **Zone ID** from the per-domain config, see next bullet).
+## 1 · Pre-flight: which accounts do I need?
 
-   ⚠️ **Naming convention**: the variable name in this template is `CF_ZONE_ID` but Cloudflare actually calls this **Account ID**. The **Zone ID** is the per-domain identifier.
-3. **Zone ID**: go to your domain → right column "Zone ID" → copy as `CF_API_TOKEN`.
-4. Create an API token at <https://dash.cloudflare.com/profile/api-tokens> → **Create Token** → use the **Edit zone WAF** template → scope it to your specific zone → save the token as `CF_API_TOKEN`.
+Open the section for **your** adapter combination only.
 
-### Step 4 — Toss Payments account (only needed if you'll use Toss billing)
+### 1.1 · `--auth=clerk` (default)
 
-1. Go to <https://tosspayments.com> → sign up → developer dashboard.
-2. From **개발자센터 → API 키** (Developer Center → API Keys), issue a **Live Secret Key** and a **Live Auth Key**.
-3. Save them as `TOSS_SECRET_KEY` and `TOSS_AUTH_KEY`.
+- **Clerk** — <https://dashboard.clerk.com>
+  - **Why**: handles sign-up/sign-in UI, OAuth, sessions, webhooks
+  - **Time**: 2 min
+  - **Skippable?** Only if you also pass `--auth=none` at scaffold time, OR set `AUTH_PROVIDER=none` later
 
-## Local env: one file
+### 1.2 · `--auth=none`
 
-### Step 5a — install pnpm + scaffold deps
+- **No external account needed.** `NoAuthAdapter` makes `auth.getUserId()` always return `null`.
+- If you want auth later, either (a) re-scaffold with `--auth=clerk`, or (b) implement a new adapter in `templates/_shared/adapters/auth/<your-provider>.ts` (see §6 below).
 
-> ⚠️ **Important**: this boilerplate uses **pnpm** (the `workspace:*` protocol in `package.json` is pnpm-only). **Don't run `npm install`** — it fails with `EUNSUPPORTEDPROTOCOL: workspace:*`.
+### 1.3 · `--db=supabase` (default)
+
+- **Supabase** — <https://supabase.com/dashboard>
+  - **Why**: Postgres DB + RLS + Edge Functions
+  - **Time**: 2 min for project + token
+  - **Skippable?** Only if you also pass `--db=neon` or set `DB_PROVIDER=neon`
+
+### 1.4 · `--db=neon`
+
+- **Neon** — <https://console.neon.tech>
+  - **Why**: serverless Postgres (HTTP driver)
+  - **Time**: 1 min
+  - **Needs**: a project + the connection string (`postgres://user:pass@ep-xxx.neon.tech/neondb?sslmode=require`) → `DATABASE_URL`
+  - **Migrations**: `pnpm drizzle-kit push` (replaces `supabase db push`)
+
+### 1.5 · `--deploy-target=vercel` (default)
+
+- **Vercel** — <https://vercel.com/signup>
+  - **Time**: 1 min
+- **Cloudflare** (optional, for WAF rules + Pages alternate) — <https://dash.cloudflare.com/sign-up>
+  - **Why**: apply `cloudflare-rules.json` WAF rules
+  - **Time**: 2 min
+  - **Skippable?** Yes — the `cloudflare-waf` GitHub Actions job is skipped if `CF_API_TOKEN` is empty
+
+### 1.6 · `--deploy-target=none`
+
+- **No deploy provider is configured.** You'll run `pnpm build && pnpm start` yourself (Docker, Fly, Railway, Cloudflare Pages manual setup, etc.).
+- GitHub Actions deploy workflow was **deleted** during scaffold. To re-add it: copy `templates/_shared/.github/workflows/deploy-shared.yml` back from the repo root.
+
+### 1.7 · Always needed (any combination)
+
+- **Toss Payments** — <https://tosspayments.com> (only if you use `/pricing` page)
+  - **Why**: billing
+  - **Time**: 5 min (corp info required)
+  - **Skippable?** Yes — `/pricing` page renders but billing buttons 500 if `TOSS_SECRET_KEY` is empty
+
+---
+
+## 2 · Install deps
+
+> ⚠️ This scaffold uses **pnpm** (the `workspace:*` protocol in `package.json` is pnpm-only). **Don't run `npm install`** — it fails with `EUNSUPPORTEDPROTOCOL`.
 
 ```bash
 # Install pnpm if you don't have it (one-time)
-npm install -g pnpm                         # (or: brew install pnpm / winget install pnpm)
-pnpm --version                              # verify (>= 8.x recommended)
+npm install -g pnpm
 
-# Then install deps
 cd <dir>                                     # the folder you scaffolded into
-pnpm install --frozen-lockfile                # uses pnpm-lock.yaml if present; otherwise pnpm install
+pnpm install
 ```
 
-### Step 5b — fill in `.env.local` (7 keys, the saas runtime config)
+---
 
-> **Auto-fill with MCP/API tokens** — if you have these in your shell, `setup.sh` will auto-populate `.env.local` from the live APIs (no manual paste needed):
->
-> ```bash
-> export SUPABASE_ACCESS_TOKEN="sbp_xxxxx"   # https://supabase.com/dashboard/account/tokens
-> export SUPABASE_PROJECT_REF="abcdefghijklmnopqrstu"  # Settings -> General
-> export VERCEL_TOKEN="vercel_xxxxx"          # https://vercel.com/account/tokens
-> # (Cloudflare tokens don't auto-fill .env.local; CF_ZONE_ID is per-domain, filled in Step 7)
-> ```
->
-> Without these set, fall back to the manual edit below.
+## 3 · Fill in `.env.local`
+
+The scaffolded `.env.example` has **only the keys your adapter choice needs**. Open `<dir>/.env.example` to see them. Common cases:
+
+### 3.1 · `--auth=clerk` (default)
 
 ```bash
 cp .env.example .env.local
-$EDITOR .env.local   # find-replace YOUR_xxx placeholders with your actual values (or skip this if you exported SUPABASE_ACCESS_TOKEN / VERCEL_TOKEN above — `./scripts/setup.sh` will auto-fill from the API)
+$EDITOR .env.local
 ```
-
-The 7 keys in saas `.env.example` (from this scaffold) are:
 
 | Key | Source |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → API → Project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → API → anon public |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → API → service_role (server-only) |
-| `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile server verify |
-| `TOSS_SECRET_KEY` | Toss → API 키 → Live Secret |
-| `TOSS_AUTH_KEY` | Toss → API 키 → Live Auth |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk → API Keys → Publishable (`pk_test_...`) |
+| `CLERK_SECRET_KEY` | Clerk → API Keys → Secret (`sk_test_...`) |
+| `CLERK_WEBHOOK_SECRET` | Clerk → Webhooks → endpoint signing secret (`whsec_...`) |
 
-> The 6 *other* secrets used by the deploy workflow (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `CF_API_TOKEN`, `CF_ZONE_ID`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`) are **NOT** in `.env.local` — they are set as GitHub Actions secrets in Step 6 by `./scripts/setup.sh` itself. You don't need to type them in `.env.local`.
+### 3.2 · `--auth=none`
 
-## Supabase + GitHub: one CLI setup script
+No Clerk keys. Skip this section.
 
-### Step 6 + 7 — `./scripts/setup.sh` does both
+### 3.3 · `--db=supabase` (default)
 
-The script lives at `<dir>/scripts/setup.sh` (created by this scaffold). It:
-- First calls `./scripts/auto-fill-env.sh` if MCP/API tokens are in your shell env (fills .env.local from live APIs)
-- Then reads your `.env.local`
-- Runs `supabase link` (links your local repo to the project from step 1)
-- Runs `supabase db push` (applies migrations)
-- Runs `supabase functions deploy billing` (deploys the Edge Function)
-- Runs `git init && git add && git commit` (only if not already a repo)
-- Runs `gh repo create … --push` (creates a GitHub repo + pushes)
-- Runs 7× `gh secret set …` to set the GitHub Actions secrets
+| Key | Source |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Settings → API → Project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase → Settings → API → Publishable (`sb_publishable_...`) |
+| `SUPABASE_SECRET_KEY` | Supabase → Settings → API → Secret (`sb_secret_...`) |
+| `SUPABASE_JWKS_URL` | (only if `--auth=clerk`) Supabase → Authentication → Sign In/Up → Third Party Auth → Add provider → Clerk → paste Clerk JWKS URL |
 
-Before running it, make sure both CLI tools are authenticated:
+**Wire Clerk as Supabase third-party auth** (only relevant if `--auth=clerk --db=supabase`):
+1. In Supabase dashboard → **Authentication → Sign In/Up → Third Party Auth → Add provider → Clerk**.
+2. Paste your Clerk **JWKS URL**:
+   - Dev: `https://<your-frontend-api>.clerk.accounts.dev/.well-known/jwks.json`
+   - Prod: `https://clerk.<your-domain>/.well-known/jwks.json`
+3. Find your frontend API at <https://dashboard.clerk.com> → **API Keys** → "Show frontend API" (or derive from `pk_test_xxx` → `xxx.clerk.accounts.dev`).
+4. Save the URL into `SUPABASE_JWKS_URL` in `.env.local`.
+
+After this, RLS policies can read the Clerk user id via `auth.jwt() ->> 'sub'`.
+
+### 3.4 · `--db=neon`
+
+| Key | Source |
+|---|---|
+| `DATABASE_URL` | Neon → Connection Details → pooled connection string |
+
+Optional overrides:
+| Key | When |
+|---|---|
+| `NEON_DATABASE_URL` | alias for `DATABASE_URL` (both checked) |
+| `POSTGRES_URL` | another alias (all three checked, first one set wins) |
+
+### 3.5 · `--deploy-target=vercel` (default)
+
+These keys go into **GitHub Actions secrets** (not `.env.local`) — `setup.sh` sets them for you in §4.
+
+| Key | Source |
+|---|---|
+| `VERCEL_TOKEN` | Vercel → Account Settings → Tokens |
+| `VERCEL_ORG_ID` | Vercel → Account Settings → General → Your ID |
+| `VERCEL_PROJECT_ID` | Auto-generated by Vercel on first project import (no manual paste needed) |
+| `CF_API_TOKEN` | Cloudflare → My Profile → API Tokens (Edit zone WAF template) |
+| `CF_ZONE_ID` | Cloudflare → domain overview → right column → Zone ID |
+| `SUPABASE_ACCESS_TOKEN` | Supabase → account/tokens → Generate new token |
+| `SUPABASE_PROJECT_REF` | Supabase → project → Settings → General → Reference ID |
+
+> These are the **7 deploy secrets** listed in `docs/DEPLOY_SECRETS.md` (the SSOT). They must all be set for the GitHub Actions deploy workflow to run cleanly; missing any one skips the matching job with a `Missing token` warning.
+
+### 3.6 · `--deploy-target=none`
+
+No deploy provider secrets needed.
+
+---
+
+## 4 · Link backend + push migrations + set GitHub secrets
+
+Only run the commands for **your** `--db` and `--deploy-target` choice. Skip the rest.
+
+### 4.1 · `--db=supabase`
 
 ```bash
-supabase login          # enter your Supabase access token from step 1
-gh auth login           # sign in to GitHub (browser will open)
+supabase login                              # one-time, paste access token
+supabase link --project-ref <your-ref>      # links this repo to the Supabase project
+supabase db push                            # applies migrations from supabase/migrations/
+supabase functions deploy billing           # deploys the Edge Function
 ```
 
-Now run the script:
+### 4.2 · `--db=neon`
 
 ```bash
-./scripts/setup.sh                  # does the actual work
-./scripts/setup.sh --dry-run        # prints what would happen — safe to re-run
-./scripts/setup.sh --check         # only verifies prereqs, doesn't mutate
+pnpm drizzle-kit push                       # applies schema to Neon (no migrations folder)
 ```
 
-If `--check` shows anything missing, fix it and re-run `--check`. Once `--check` is clean, run `./scripts/setup.sh` for real.
+### 4.3 · `--deploy-target=vercel`
 
-## First deploy
+```bash
+gh auth login                               # one-time
+./scripts/setup.sh                          # sets 7 GitHub Actions secrets + creates repo + pushes
+./scripts/setup.sh --check                  # verifies prereqs (dry-run; no mutation)
+./scripts/setup.sh --dry-run                # prints what would happen (safe to re-run)
+```
 
-### Step 8 — push triggers the entire deploy
+### 4.4 · `--deploy-target=none`
 
-Once `./scripts/setup.sh` finishes, your commit is on GitHub AND all 7 secrets are set. The `templates/saas/.github/workflows/deploy.yml` workflow runs **automatically on push to the default branch**:
+No GitHub Actions deploy configured. Push to GitHub yourself:
 
-1. **Vercel deploy** — imports your GitHub repo on first push (if not yet imported) and deploys. The Vercel project settings page is where the `NEXT_PUBLIC_*` env vars live (steps 1-4).
+```bash
+git remote add origin git@github.com:<you>/<repo>.git
+git push -u origin main
+```
 
-   First-time auto-import: visit Vercel → **Add New → Project** → select your repo → accept auto-detected Next.js build → **Deploy**. This is the only manual Vercel action; subsequent pushes auto-deploy.
+Then deploy `pnpm build` output via your platform of choice.
 
-2. **Supabase Edge Functions** — auto-deploys `billing` via the GitHub Action's `supabase-functions` job.
+---
 
-3. **Cloudflare WAF** — auto-applies `cloudflare-rules.json` (6 rules) to your zone via the GitHub Action's `cloudflare-waf` job.
+## 5 · First deploy
 
-4. **Cloudflare Pages** — *optional*. If you want to deploy via Cloudflare Pages instead of Vercel, see the alternative below.
+### 5.1 · `--deploy-target=vercel`
 
-To watch progress:
+First-time only: visit Vercel → **Add New → Project** → select your repo → accept auto-detected Next.js build → **Deploy**.
+
+Subsequent pushes auto-deploy. Watch progress:
 
 ```bash
 gh run watch
 ```
 
-To trigger manually (useful for the first run before auto-deploy is wired):
+4 jobs run in parallel:
+- `vercel-deploy` — Next.js build + push to Vercel
+- `cloudflare-pages-deploy` — alternate deploy target (skipped if `CF_API_TOKEN` is empty)
+- `supabase-functions` — deploys `billing` Edge Function (skipped if `--db=neon`)
+- `cloudflare-waf` — applies WAF rules from `cloudflare-rules.json` (skipped if `CF_API_TOKEN` is empty)
+
+### 5.2 · `--deploy-target=none`
 
 ```bash
-gh workflow run deploy.yml
+pnpm build
+pnpm start                                  # production server on :3000
 ```
 
-## What you should see (verify each step)
+Or push the `.next/` output to your platform (Docker / Fly / Railway / etc.).
 
-- `https://<your-project>.vercel.app` returns 200 with your landing page.
-- `supabase functions list --project-ref $SUPABASE_PROJECT_REF` shows `billing` deployed.
-- Cloudflare dashboard → your zone → **Security → WAF → Custom Rules** shows 6 rules.
-- Toss billing test: visit `/pricing` on your deployed app → subscribe with a test card → check Toss dashboard for the auto-created billing key.
+---
 
-## Alternative: Cloudflare Pages instead of Vercel
+## 6 · Adding a new adapter (advanced)
 
-If you'd rather deploy via Cloudflare Pages (skip Vercel entirely):
+If `--auth=none` and `--db=neon` don't cover your case, the adapter pattern makes it cheap to add new backends:
 
-1. Add `CF_API_TOKEN` + `CF_ZONE_ID` (already required for WAF) — both jobs reuse the same secrets.
-2. The `deploy-shared.yml` composite's `cloudflare-pages-deploy` job has an `if: ${{ secrets.CF_API_TOKEN != '' }}` guard — set those secrets and the Pages job runs.
-3. First-time only: visit Cloudflare → **Workers & Pages → Create application → Pages → Connect to Git** → pick your repo → accept auto-detected Next.js build settings → **Save and Deploy**.
+### 6.1 · New auth provider (e.g. NextAuth, Auth0, Supabase Auth)
 
-## Troubleshooting
+1. Create `templates/_shared/adapters/auth/<provider>.ts`:
+
+```ts
+import type { AuthAdapter } from './types';
+
+export class NextAuthAdapter implements AuthAdapter {
+  readonly kind = 'nextauth' as const;
+  // implement getUserId/getUser/getToken/requireUserId/useUser/useToken
+  // implement Provider/SignInButton/SignUpButton/SignOutButton/UserButton
+}
+
+export const nextAuthAdapter = new NextAuthAdapter();
+```
+
+2. Register in `templates/_shared/adapters/auth/index.ts#detectKind()`:
+
+```ts
+if (env.AUTH_PROVIDER === 'nextauth') return 'nextauth';
+```
+
+3. Consumer code is unchanged — it calls `getAuthAdapter()` and the factory returns your adapter.
+
+### 6.2 · New DB provider (e.g. PlanetScale, D1, Prisma+Postgres)
+
+Same shape — create `templates/_shared/adapters/db/<provider>.ts` implementing the `DbAdapter` interface, register in the factory's `detectKind()`.
+
+### 6.3 · Adapter pattern contract
+
+See `templates/_shared/adapters/<auth|db>/types.ts` for the full interface. Each method's behavior is documented inline.
+
+---
+
+## 7 · What you should see (verify each step)
+
+- `https://<your-project>.vercel.app` returns 200 with your landing page (only if `--deploy-target=vercel`)
+- `supabase functions list --project-ref $SUPABASE_PROJECT_REF` shows `billing` deployed (only if `--db=supabase`)
+- Cloudflare dashboard → your zone → **Security → WAF → Custom Rules** shows 6 rules (only if `CF_API_TOKEN` set + `--deploy-target=vercel`)
+- `/pricing` page renders (always); billing buttons work only if `TOSS_SECRET_KEY` is set
+
+---
+
+## 8 · Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `./scripts/setup.sh: command not found: supabase` | Supabase CLI not installed | `brew install supabase/tap/supabase` (or `npm i -g supabase`) |
-| `./scripts/setup.sh: command not found: gh` | GitHub CLI not installed | `brew install gh` (or `npm i -g gh`), then `gh auth login` |
-| `supabase login` succeeds but `supabase link` fails with 401 | Wrong access token | regenerate at <https://supabase.com/dashboard/account/tokens> |
-| `gh repo create` fails with `repo not found` | You don't have permission to create repos in the namespace | create the repo under your own user (`gh repo create my-saas --private --source=.`) |
-| First push doesn't trigger the deploy workflow | repo isn't on the default branch | `git branch -M <default-branch> && git push -u origin <default-branch>`; the workflow fires on every push to the default branch with no path filter |
-| `error: secrets.CF_API_TOKEN not found` in the Actions run | you set some secrets but not all 7 | re-run `./scripts/setup.sh` after fixing `.env.local` |
+| `pnpm install` fails with `EUNSUPPORTEDPROTOCOL: workspace:*` | ran `npm install` instead | use `pnpm install` — the `workspace:*` protocol is pnpm-only |
+| `auth.getUserId()` returns `null` even after sign-in | `AUTH_PROVIDER` mismatch | check `.env.local` for `AUTH_PROVIDER=none` override; remove or set to `clerk` |
+| `auth.getUser()` returns Clerk user but Supabase RLS rejects | JWKS URL not wired | re-do §3.3 step 6 (paste JWKS URL into Supabase dashboard) |
+| `db.from('plans').select()` returns `error: NeonDbAdapter query execution not yet implemented` | Neon adapter MVP scope | tracked as follow-up; for now, use Drizzle directly or wait for next adapter release |
+| `db.auth.getUser()` returns `data: null` even with valid Clerk JWT | DB adapter is Neon (`auth.getUser()` is Supabase-only) | Neon adapter doesn't proxy Supabase auth — use Clerk's `auth.getUser()` separately |
+| Vercel deploy fails with `Missing token` | GitHub secret not set | re-run `./scripts/setup.sh` (it re-sets all 7 secrets) |
+| First push doesn't trigger the deploy workflow | repo isn't on the default branch | `git branch -M main && git push -u origin main` |
 
-## Time estimate
+---
 
-| Once | Task | Time |
-|---|---|---|
-| Once | sign-up for 4 services (Supabase, Vercel, Cloudflare, Toss) | ~5 min |
-| Once | fill `.env.local` (one-line per key, paste) | ~30 sec |
-| Once | run `./scripts/setup.sh` (or dry-run first) | ~1 min |
-| Once | import Vercel project on first push | ~30 sec |
-| Every push | auto-deploy (Vercel + Supabase functions + Cloudflare WAF) | ~2 min |
+## 9 · Time estimate (by adapter combination)
 
-Total one-time: ~10 min. Every subsequent push auto-deploys.
+| `--auth` | `--db` | `--deploy-target` | Total time |
+|---|---|---|---|
+| `clerk` | `supabase` | `vercel` | ~15 min |
+| `clerk` | `supabase` | `none` | ~10 min |
+| `clerk` | `neon` | `vercel` | ~12 min |
+| `clerk` | `neon` | `none` | ~8 min |
+| `none` | `supabase` | `vercel` | ~12 min |
+| `none` | `supabase` | `none` | ~7 min |
+| `none` | `neon` | `vercel` | ~10 min |
+| `none` | `neon` | `none` | ~5 min |
