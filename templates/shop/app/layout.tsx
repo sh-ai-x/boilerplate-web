@@ -11,7 +11,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     const c = cookies();
     const s = createServerSupabase({ get: (n) => c.get(n), set: (n, v, o) => c.set(n, v, o as never) });
     const { data } = await s.auth.getUser();
-    sessionEmail = data.user?.email ?? null;
+    sessionEmail = data?.user?.email ?? null;
   } catch (_) {}
   return (
     <html lang="en">

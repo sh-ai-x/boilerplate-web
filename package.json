@@ -1,6 +1,6 @@
 {
   "name": "create-boilerplate-web",
-  "version": "0.1.0",
+  "version": "0.2.5",
   "description": "Scaffold a Next.js + Supabase + Cloudflare + Toss template (saas, shop, or portfolio) into a target folder.",
   "repository": {
     "type": "git",

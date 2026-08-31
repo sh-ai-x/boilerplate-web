@@ -1,22 +1,27 @@
 {
   "version": 1,
-  "ref": "74ac31591bcff58f2ccaa2331983e285b57adb36",
-  "source": "github:sanghee-dev/boilerplate-web",
+  "ref": "a3266d52b530bb9cacf10d4b510debc5eab8ca71",
+  "source": "github:sh-ai-x/boilerplate-web",
   "templates": {
     "saas": "templates/saas",
     "shop": "templates/shop",
-    "portfolio": "templates/portfolio"
+    "portfolio": "templates/portfolio",
+    "_shared": "templates/_shared"
   },
   "checksum_algorithm": "sha256",
   "checksums": {
-    "saas": "sha256:54ec533c121b5d48569dfb8d3a0a538d61ede5737768ba1d605538c304c4469b",
-    "shop": "sha256:5e75f3e65df33804334715a2ffa48bf4293ad6cd20f39e553ac8ca14ab8e55b8",
-    "portfolio": "sha256:88758e96e156227e176735351b42fc0654ca9512a416c2b37e37e67b551d9717"
+    "saas": "sha256:1e3fc9ea750bc6f49527b8effc32a15355bddfe60431a7bb07c9b95e4f9f7376",
+    "shop": "sha256:07adaae9c4c707cd1f3411f24d21a21fbc1aad99c7280947c02520a1800d948b",
+    "portfolio": "sha256:964699eb75892f580d7a4af8e5ad411307093c508a0a9d51317503512bd182d2",
+    "_shared": "sha256:4119128a052691a918fb041bf5eba49b5204b67b70b0170c3933a600e13ecf4c"
   },
   "notes": [
     "ref MUST be an immutable commit SHA, not a tag or branch. Tags can be re-pointed.",
     "Bump this file on each release: pin to the SHA of the merge commit that lands the templates.",
     "Consumers (the CLI) read this file at runtime to avoid drift between CLI version and template contents.",
-    "checksums.<type> is the SHA-256 of templates/<type>/package.json, the lockfile entry point. The CLI verifies the on-disk package.json against this digest before using the local fast path; on mismatch it falls through to the SHA-pinned degit remote path."
-  ]
+    "checksums.<type> is the SHA-256 of templates/<type>/package.json, the lockfile entry point. The CLI verifies the on-disk package.json against this digest before using the local fast path; on mismatch it falls through to the SHA-pinned degit remote path.",
+    "2026-08-24: source flipped from github:sanghee-dev/boilerplate-web (HTTP 404, dead) to sh-ai-x/boilerplate-web (the actual canonical home).",
+    "2026-08-24: added templates._shared (so the CLI can degit the shared package into the scaffolded target; the saas/shop/portfolio templates reference @boilerplate-web/shared via workspace:*)"
+  ],
+  "updated_at": "2026-08-26T00:00:00Z"
 }

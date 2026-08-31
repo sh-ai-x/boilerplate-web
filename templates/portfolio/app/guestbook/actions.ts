@@ -10,7 +10,7 @@ export async function postGuestbookEntry(formData: FormData): Promise<{ ok: bool
 
   const c = cookies();
   const s = createServerSupabase({ get: (n) => c.get(n), set: (n, v, o) => c.set(n, v, o as never) });
-  const { data: { user } } = await s.auth.getUser();
+  const { data: { user } = { user: null } } = await s.auth.getUser() ?? { data: { user: null } };
   if (!user) return { ok: false, error: 'unauthenticated' };
 
   // INSERT INTO guestbook_entries (user_id, message) VALUES (auth.uid(), $message)

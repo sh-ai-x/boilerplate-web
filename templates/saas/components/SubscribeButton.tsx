@@ -1,56 +1,71 @@
 'use client';
 
-import { useState } from 'react';
-import { Turnstile } from '@boilerplate-web/shared/components';
-import { createBrowserSupabase } from '@boilerplate-web/shared/supabase';
+import React, { useState } from 'react';
+import { getAuthAdapter } from '@boilerplate-web/shared/adapters/auth';
 
 interface SubscribeButtonProps {
   planId: string;
 }
 
 export function SubscribeButton({ planId }: SubscribeButtonProps) {
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // AuthAdapter hooks: useUser() returns { user, isLoaded } (mirrors Clerk's
+  // useUser); useToken() returns a stable function that resolves to the
+  // current session token. For NoAuthAdapter, both return null/false.
+  const auth = getAuthAdapter();
+  const { user, isLoaded } = auth.useUser();
+  const getToken = auth.useToken();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  if (isLoaded && !user) {
+    return (
+      <a href="/sign-in">
+        <button type="button">Sign in to subscribe</button>
+      </a>
+    );
+  }
+
   async function onClick() {
     setError(null);
     setSuccess(null);
-    if (!turnstileToken) {
-      setError('Please complete the Turnstile challenge.');
-      return;
-    }
     setSubmitting(true);
     try {
-      const supabase = createBrowserSupabase();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError('Please sign in first.');
+      // A01: the Edge Function verifies the Clerk session JWT itself
+      // (see billing/index.ts: verifyToken). The browser just forwards
+      // the session token.
+      const token = await getToken();
+      if (!token) {
+        setError('Please sign in again.');
         setSubmitting(false);
         return;
       }
-      // Call the Edge Function. We do NOT pass amount/price — the function
-      // fetches price_cents from the plans table server-side.
-      const session = (await supabase.auth.getSession()).data.session;
+      // The Toss card-auth flow happens client-side BEFORE this call -
+      // the resulting authKey is sent in the body. (For brevity this
+      // template omits the Toss Checkout.js wiring; a real deployment
+      // would integrate Toss Checkout and pass authKey here.)
+      const authKey = prompt('Paste Toss card-auth authKey (or cancel):') ?? '';
+      if (!authKey) {
+        setSubmitting(false);
+        return;
+      }
       const res = await fetch(
         `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/billing`,
         {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            authorization: `Bearer ${session?.access_token ?? ''}`,
+            authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             plan_id: planId,
-            customer_key: user.id,
-            turnstile_token: turnstileToken,
-            // Note: deliberately NOT sending amount/price — the Edge Function
-            // fetches these from the DB.
+            auth_key: authKey,
+            // Note: deliberately NOT sending amount/price - the Edge
+            // Function fetches these from the DB.
           }),
         }
       );
-      const data = await res.json() as { ok?: boolean; subscription_id?: string; error?: string };
+      const data = (await res.json()) as { ok?: boolean; subscription_id?: string; error?: string };
       if (!res.ok || !data.ok) {
         setError(data.error ?? `HTTP ${res.status}`);
       } else {
@@ -65,11 +80,7 @@ export function SubscribeButton({ planId }: SubscribeButtonProps) {
 
   return (
     <div>
-      <Turnstile
-        siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? ''}
-        onVerify={setTurnstileToken}
-      />
-      <button type="button" onClick={onClick} disabled={submitting}>
+      <button type="button" onClick={onClick} disabled={submitting || !isLoaded}>
         {submitting ? 'Subscribing…' : 'Subscribe'}
       </button>
       {error ? <p role="alert" style={{ color: 'crimson' }}>{error}</p> : null}

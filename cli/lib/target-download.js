@@ -73,10 +73,12 @@ function buildSrc(type) {
   if (!validateType(type)) {
     throw new Error(`Invalid --type "${type}"`);
   }
-  // github:<repo>#<sha>/<subdir-from-lockfile>
+  // github:<repo>#<sha>#<subdir-from-lockfile>
+  // Format compatible with degit 3.x (which uses # as both the repo-SHA
+  // and SHA-subdir separator; /  is NOT supported as a subdir separator).
   // The subdir comes from the lockfile, NOT hardcoded. This is the lockfile
   // SSOT claim (review nit).
-  return `${lock.source}#${lock.ref}/${lock.templates[type]}`;
+  return `${lock.source}#${lock.ref}#${lock.templates[type]}`;
 }
 
 // Verify a package.json's SHA-256 against the lockfile manifest for `type`.
@@ -274,6 +276,126 @@ function copyDirSync(src, dest, opts = {}) {
   }
 }
 
+// Phase 2-deploy-automation: every consumer template (saas/shop/portfolio)
+// references `@boilerplate-web/shared` via `workspace:*`. Both the
+// local fast path AND the degit path must scaffold the shared package
+// and write pnpm-workspace.yaml. Without it, `pnpm install` fails with
+// `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND`.
+//
+// This helper is called from BOTH paths. It's best-effort: a failure
+// logs a warning to stderr with the manual recovery command (the user
+// can run `npx degit ...` themselves) but does NOT fail the scaffold.
+// Phase 2-deploy-automation: every consumer template (saas/shop/portfolio)
+// references `@boilerplate-web/shared` via `workspace:*`. Both the local
+// fast path AND the degit path must scaffold the shared package and write
+// pnpm-workspace.yaml. Without it, `pnpm install` fails with
+// `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND`.
+//
+// Implementation note: degit 3.x's subdirectory extraction only works for
+// the repo's DEFAULT BRANCH. The `repo#sha/subdir` and `repo#sha#subdir`
+// forms either fail or silently extract the WHOLE repo at the SHA. We
+// therefore download the tarball from codeload.github.com directly and
+// extract `<repo>-<short>/<subdir>/` ourselves. This gives us a SHA-pinned
+// subdir extraction without depending on degit's quirky parser.
+function scaffoldShared(targetFolder) {
+  const pathMod = require('path');
+  const fsMod = require('fs');
+  const childProcess = require('child_process');
+  const osMod = require('os');
+  const httpsMod = require('https');
+  const lock = getLock();
+  const sharedDir = lock.templates._shared;
+  if (!sharedDir) return Promise.resolve();
+  const sharedTarget = pathMod.join(targetFolder, '_shared');
+
+  // Parse `github:<repo>` from lock.source for the codeload URL.
+  const m = String(lock.source).match(/^github:([^#]+)$/);
+  if (!m) {
+    process.stderr.write(
+      'Warning: cannot scaffold _shared/ - lockfile source is not github:<repo> (' + lock.source + ').\n'
+    );
+    return Promise.resolve();
+  }
+  const repo = m[1];
+  const ref = lock.ref;
+  const tarUrl = 'https://codeload.github.com/' + repo + '/tar.gz/' + ref;
+
+  return new Promise(function (resolve, reject) {
+    const fetchTarball = function (url) {
+      return new Promise(function (res, rej) {
+        const req = httpsMod.get(url, function (r) {
+          if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+            r.resume();
+            fetchTarball(r.headers.location).then(res, rej);
+            return;
+          }
+          if (r.statusCode !== 200) {
+            r.resume();
+            rej(new Error('codeload HTTP ' + r.statusCode + ' for ' + repo + '@' + ref));
+            return;
+          }
+          const chunks = [];
+          r.on('data', function (c) { chunks.push(c); });
+          r.on('end', function () { res(Buffer.concat(chunks)); });
+          r.on('error', rej);
+        });
+        req.on('error', rej);
+      });
+    };
+
+    fetchTarball(tarUrl).then(function (tarBuf) {
+      // Extract to a tmp dir so the tarball itself doesn't appear in
+      // readdirSync of the target.
+      const tmpRoot = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'cbw-shared-'));
+      try {
+        const tmpTar = pathMod.join(tmpRoot, 'repo.tar');
+        const extractDir = pathMod.join(tmpRoot, 'extracted');
+        fsMod.mkdirSync(extractDir);
+        fsMod.writeFileSync(tmpTar, tarBuf);
+        childProcess.execFileSync('tar', ['-xzf', tmpTar, '-C', extractDir]);
+        fsMod.unlinkSync(tmpTar);
+        // GitHub tarballs have a single top-level dir like
+        // 'boilerplate-web-<short-sha>/'. Subdir is relative to that.
+        const innerItems = fsMod.readdirSync(extractDir);
+        if (innerItems.length !== 1) {
+          throw new Error('unexpected tarball structure (items=' + innerItems.length + ')');
+        }
+        const topLevel = innerItems[0];
+        const source = pathMod.join(extractDir, topLevel, sharedDir);
+        if (!fsMod.existsSync(source)) {
+          throw new Error('subdir ' + sharedDir + ' not found in ' + repo + '@' + ref);
+        }
+        fsMod.mkdirSync(sharedTarget, { recursive: true });
+        try {
+          childProcess.execFileSync('rsync', ['-a', source + '/.', sharedTarget + '/'], { stdio: 'pipe' });
+        } catch (_) {
+          childProcess.execFileSync('cp', ['-R', source + '/.', sharedTarget + '/']);
+        }
+        const wsYaml = [
+          '# Auto-generated by create-boilerplate-web (phase 2-deploy-automation).',
+          '# The user template references @boilerplate-web/shared via workspace:*,',
+          '# so we ship a 2-package workspace: the main template + _shared.',
+          'packages:',
+          '  - .',
+          '  - _shared',
+          '',
+        ].join('\n');
+        fsMod.writeFileSync(pathMod.join(targetFolder, 'pnpm-workspace.yaml'), wsYaml);
+        resolve();
+      } catch (e) {
+        reject(e);
+      } finally {
+        try { childProcess.execFileSync('rm', ['-rf', tmpRoot]); } catch (_) {}
+      }
+    }, reject);
+  }).catch(function (sharedErr) {
+    process.stderr.write(
+      'Warning: could not scaffold _shared/ (' + sharedErr.message + '). ' +
+      'Run `npx degit "github:' + repo + '#' + ref + '#' + sharedDir + '" _shared` in the target dir.\n'
+    );
+  });
+}
+
 function downloadTemplate(type, targetFolder, opts = {}) {
   if (!validateType(type)) {
     const err = new Error(
@@ -323,8 +445,17 @@ function downloadTemplate(type, targetFolder, opts = {}) {
       err.code = 'LOCAL_COPY_FAILED';
       return Promise.reject(err);
     }
-    return Promise.resolve();
+    // Local fast path also needs to scaffold _shared/ + write
+    // pnpm-workspace.yaml. See degit-path comment below for full
+    // rationale. The local copy already wrote templates/<type>/ files
+    // so we just need the shared package + workspace yaml.
+    return scaffoldShared(target).then(() => {});
   }
+
+  // Cache lock at function-scope so the .then() callback can read
+  // lock.templates._shared for the post-2-deploy-automation _shared
+  // scaffold step (see PR #64 followup).
+  const lock = getLock();
 
   // degitImpl is an optional dependency-injection seam (tests pass a fake;
   // production loads the real module). It lives on opts so the public surface
@@ -332,7 +463,12 @@ function downloadTemplate(type, targetFolder, opts = {}) {
   let degit = opts.degitImpl;
   if (!degit) {
     try {
-      degit = require('degit');
+      // degit 3.x ships as ESM (type: module) with `default` export. In CJS,
+      // `require('degit')` returns the namespace object `{__esModule, default}`,
+      // NOT the function directly. Unwrap to `default` if present, otherwise
+      // use the require result directly (degit 2.x CJS export).
+      const required = require('degit');
+      degit = (required && typeof required.default === 'function') ? required.default : required;
     } catch (_) {
       const err = new Error(
         'Missing dependency "degit". Run `npm install` in the CLI root.'
@@ -344,10 +480,12 @@ function downloadTemplate(type, targetFolder, opts = {}) {
 
   const { degitImpl: _drop, ...cloneOpts } = opts;
   const force = cloneOpts.force === true;
+  process.stderr.write('DEBUG: about to call degit(), degit type=' + typeof degit + ' degit.default type=' + (degit.default && typeof degit.default) + '\n');
   const emitter = degit(buildSrc(type), { cache: false, force, verbose: false });
+  process.stderr.write('DEBUG: emitter type=' + typeof emitter + ' has clone=' + (emitter && typeof emitter.clone) + '\n');
   const resolvedTarget = path.resolve(targetFolder);
   return emitter.clone(resolvedTarget).then(
-    () => {
+    async () => {
       // A08-1 / A08-3: even the SHA-pinned github: source can drift if the
       // ref is re-pointed upstream between lockfile bumps. Re-verify the
       // cloned package.json against the lockfile SHA-256 manifest.
@@ -362,6 +500,46 @@ function downloadTemplate(type, targetFolder, opts = {}) {
         );
       }
       verifyTemplateChecksum(type, clonedPkg);
+
+      // Phase 2-deploy-automation: every consumer template (saas/shop/portfolio)
+      // references `@boilerplate-web/shared` via `workspace:*`. The main
+      // degit above only clones `templates/<type>/`, NOT `templates/_shared/`.
+      // Without `_shared/` in the scaffolded target, `pnpm install` fails
+      // with `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND`.
+      //
+      // Fix: also degit `templates/_shared/` to `<target>/_shared/`, then
+      // write a pnpm-workspace.yaml at the target root that lists both
+      // packages. With the workspace in place, `workspace:*` resolves
+      // correctly.
+      const sharedDir = getLock().templates._shared;
+      if (sharedDir) {
+        const sharedTarget = path.join(resolvedTarget, '_shared');
+        // degit 3.x: subdir separator is '#', not '/'.
+  const sharedSrc = lock.source + '#' + lock.ref + '#' + sharedDir;
+        try {
+          const sharedEmitter = degit(sharedSrc, { cache: false, force, verbose: false });
+          await sharedEmitter.clone(sharedTarget);
+          const wsYaml = [
+            '# Auto-generated by create-boilerplate-web (phase 2-deploy-automation).',
+            '# The user template references @boilerplate-web/shared via workspace:*,',
+            '# so we ship a 2-package workspace: the main template + _shared.',
+            'packages:',
+            '  - .',
+            '  - _shared',
+            '',
+          ].join('\n');
+          fs.writeFileSync(path.join(resolvedTarget, 'pnpm-workspace.yaml'), wsYaml);
+        } catch (sharedErr) {
+          // Non-fatal: log but don't block scaffold. Without _shared, the
+          // operator's `pnpm install` will fail and they can fix it manually
+          // (see SETUP.md). Failing CLOSED here would block valid scaffolds
+          // when only the degit network blip is at fault.
+          process.stderr.write(
+            'Warning: could not scaffold _shared/ (' + sharedErr.message + '). ' +
+            'Run `npx degit "' + sharedSrc + '" _shared` in the target dir.\n'
+          );
+        }
+      }
     },
     (e) => {
       const err = new Error(`degit clone failed: ${e && e.message ? e.message : String(e)}`);

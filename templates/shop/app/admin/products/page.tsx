@@ -17,7 +17,8 @@ interface Product { id: string; name: string; description: string | null; price_
 async function requireAdmin(): Promise<void> {
   const c = cookies();
   const s = createServerSupabase({ get: (n) => c.get(n), set: (n, v, o) => c.set(n, v, o as never) });
-  const { data: { user } } = await s.auth.getUser();
+  const { data } = await s.auth.getUser();
+  const user = data?.user ?? null;
   if (!user) redirect('/');
   const role = (user.app_metadata as { role?: string } | null)?.role;
   if (role !== 'admin') redirect('/');

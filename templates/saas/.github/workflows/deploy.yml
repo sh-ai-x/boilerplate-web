@@ -1,0 +1,93 @@
+name: deploy (saas)
+
+# Per-template deploy workflow for the saas boilerplate.
+# Invoked by pushing to main with a path filter; operators can also
+# trigger it manually via workflow_dispatch.
+#
+# Jobs:
+#   1. deploy-shared  — Vercel + Cloudflare Pages (via composite)
+#   2. supabase-functions — supabase functions deploy billing
+#   3. cloudflare-waf — apply cloudflare-rules.json to the zone
+#
+# Required GitHub repo secrets: see docs/DEPLOY_SECRETS.md
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-saas-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-shared:
+    name: shared — Vercel + Cloudflare Pages
+    uses: ./_shared/.github/workflows/deploy-shared.yml
+    with:
+      template-type: saas
+    secrets:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+  supabase-functions:
+    name: supabase — functions deploy (billing)
+    runs-on: ubuntu-latest
+    needs: deploy-shared
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@aa3515eac405eac768fa4a72147c22d88a283c7b
+        with:
+          version: latest
+      - name: Deploy Edge Function(s) — billing
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          supabase functions deploy billing \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --token "$SUPABASE_ACCESS_TOKEN"
+
+  cloudflare-waf:
+    name: cloudflare — WAF (cloudflare-rules.json → zone ruleset)
+    runs-on: ubuntu-latest
+    needs: deploy-shared
+    if: ${{ secrets.CF_API_TOKEN != '' && secrets.CF_ZONE_ID != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Sanity-check cloudflare-rules.json shape + count
+        run: |
+          set -euo pipefail
+          count=$(jq 'length' cloudflare-rules.json)
+          if [ "$count" -lt 5 ]; then
+            echo "::error::cloudflare-rules.json has $count rules (expected >= 5); refusing to push a partial WAF"
+            exit 1
+          fi
+      - name: Wrap into Cloudflare v4 ruleset envelope
+        run: |
+          # cloudflare-rules.json is a top-level JSON array.
+          # Cloudflare v4 /zones/<id>/rulesets expects { name, kind, phase, rules: [...] }.
+          jq '{ name: "boilerplate-web-waf", kind: "zone", phase: "http_request_firewall_custom", rules: . }' \
+            cloudflare-rules.json > /tmp/ruleset.json
+      - name: PUT ruleset to Cloudflare
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          curl -fsS -X PUT \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data @/tmp/ruleset.json \
+            "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/rulesets" \
+            | jq '.success, .result.id'
